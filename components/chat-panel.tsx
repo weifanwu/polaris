@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowUp, Bot, ChevronRight, PanelRightClose, PanelRightOpen, Search, Sparkles, UserRound } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { ArrowUp, Bot, ChevronRight, PanelRightClose, PanelRightOpen, Search, Sparkles, Trash2, UserRound } from "lucide-react";
 import type { ChatMessage } from "@/types";
 
 export const examplePrompts = [
@@ -15,6 +16,7 @@ type Props = {
   messages: ChatMessage[];
   loadingStage: "searching" | "structuring" | null;
   onToggle: () => void;
+  onClear: () => void;
   onQueryChange: (query: string) => void;
   onSubmit: () => void;
   onFocusWidget: (id: string) => void;
@@ -26,10 +28,22 @@ export function ChatPanel({
   messages,
   loadingStage,
   onToggle,
+  onClear,
   onQueryChange,
   onSubmit,
   onFocusWidget,
 }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const scrollArea = scrollRef.current;
+    if (!scrollArea) return;
+    scrollArea.scrollTo({
+      top: scrollArea.scrollHeight,
+      behavior: messages.length > 1 ? "smooth" : "auto",
+    });
+  }, [loadingStage, messages]);
+
   if (collapsed) {
     return (
       <aside className="chat-collapsed">
@@ -43,10 +57,21 @@ export function ChatPanel({
     <aside className="chat-panel">
       <header className="chat-header">
         <div><span>DATA AGENT</span><h2>Ask Polaris</h2></div>
-        <button className="icon-button" onClick={onToggle} aria-label="Collapse chat panel"><PanelRightClose size={17} /></button>
+        <div className="chat-header-actions">
+          <button
+            className="icon-button danger"
+            onClick={onClear}
+            disabled={messages.length === 0 || Boolean(loadingStage)}
+            aria-label="Clear conversation"
+            title="Clear conversation"
+          >
+            <Trash2 size={16} />
+          </button>
+          <button className="icon-button" onClick={onToggle} aria-label="Collapse chat panel"><PanelRightClose size={17} /></button>
+        </div>
       </header>
 
-      <div className="chat-scroll">
+      <div className="chat-scroll" ref={scrollRef}>
         {messages.length === 0 ? (
           <div className="chat-welcome">
             <div className="agent-avatar"><Sparkles size={18} /></div>

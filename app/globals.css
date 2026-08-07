@@ -265,11 +265,12 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 @keyframes focus-in { from { opacity: 0; } }
 
 /* Chat */
-.chat-panel { width: 390px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #0a0f13; transition: width 180ms ease; }
+.chat-panel { width: 390px; height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--line); background: #0a0f13; transition: width 180ms ease; }
 .chat-header { height: 84px; flex: 0 0 84px; padding: 20px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
 .chat-header span { color: var(--cyan); font-size: 8px; font-weight: 700; letter-spacing: .18em; }
 .chat-header h2 { margin: 5px 0 0; font-size: 17px; letter-spacing: -.02em; }
-.chat-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px 18px; }
+.chat-header-actions { display: flex; align-items: center; gap: 2px; }
+.chat-scroll { flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y; padding: 20px 18px; }
 .chat-welcome { padding-top: 8px; }
 .agent-avatar, .message-avatar { display: grid; place-items: center; color: var(--cyan); border: 1px solid rgba(34, 211, 238, .2); background: var(--cyan-soft); }
 .agent-avatar { width: 38px; height: 38px; border-radius: 11px; }
@@ -332,7 +333,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   .dashboard-header { height: auto; min-height: 112px; padding: 18px; }
   .dashboard-header p, .dashboard-stats div:first-child { display: none; }
   .canvas-scroll { padding: 14px; min-height: 520px; }
-  .chat-panel { width: 100%; min-height: 520px; border-left: 0; border-top: 1px solid var(--line); }
+  .chat-panel { width: 100%; height: calc(100vh - 64px); min-height: 520px; max-height: 720px; border-left: 0; border-top: 1px solid var(--line); }
   .chat-collapsed { width: 100%; height: 48px; flex-direction: row; justify-content: center; border-left: 0; border-top: 1px solid var(--line); }
   .chat-collapsed button { margin: 0; }
   .chat-collapsed span { margin: 0 0 0 10px; writing-mode: initial; }

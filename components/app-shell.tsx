@@ -223,6 +223,10 @@ export function AppShell() {
     setRefreshErrors({});
   }, []);
 
+  const clearConversation = useCallback(() => {
+    setMessages([]);
+  }, []);
+
   return (
     <main className="app-shell">
       <Sidebar
@@ -265,6 +269,7 @@ export function AppShell() {
         messages={messages}
         loadingStage={loadingStage}
         onToggle={() => setChatCollapsed((value) => !value)}
+        onClear={clearConversation}
         onQueryChange={setQuery}
         onSubmit={submit}
         onFocusWidget={focusWidget}
