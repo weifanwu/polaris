@@ -84,6 +84,7 @@ export const modelWidgetResultSchema = z.object({
       ),
       rows: z.array(z.object({ cells: z.array(z.string()) })),
       summary: z.string(),
+      resolvedQuery: z.string(),
     })
     .nullable(),
 });

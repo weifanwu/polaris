@@ -11,10 +11,12 @@ import {
 export const runtime = "nodejs";
 
 const SYSTEM_PROMPT = `You turn a user's data question into exactly one dashboard widget.
+The input may include a multi-turn conversation. Treat the latest unresolved data request as the active goal. Merge follow-up answers with constraints established in earlier turns, including metric, geography, period, comparison groups, calculation method, and visualization choice. Never ask again for information the user already supplied. If the user says remaining choices are flexible, choose a sensible comparable default and state it in the subtitle or summary.
 Use Web Search for current values, prices, economic data, market data, or recent events. Use only numbers directly supported by search results; never recall, estimate, interpolate, or invent values.
 For exact lists and time series, search with the relevant English name, ticker, or identifier in addition to the user's language. Prefer direct historical-data tables and primary or official sources. Run additional searches and open the most useful result pages until every requested row is supported; do not stop after a snippet that contains only part of the requested range.
 Prefer 3–30 comparable rows or time-series rows. Return no more than 6 columns and 30 rows. Every row must contain exactly one string cell per column. Mark each column's data type and unit. For line_chart and bar_chart, use the first column as the x-axis and make every remaining series numeric. For metric, place the primary numeric value in the first row's first numeric column. Choose table when the shape is not clearly chartable.
 If ambiguity would materially change the answer, return needs_clarification with widget null. If trustworthy search evidence is insufficient, return cannot_answer with widget null. A success response must contain a non-empty widget.
+For every success response, widget.resolvedQuery must be a concise, standalone restatement of the fully resolved request. It must include material choices learned from conversation history so the same widget can be refreshed later without the history.
 Do not output Markdown, HTML, React, JavaScript, or commentary outside the schema.`;
 
 const RETRY_PROMPT = `This is a second research pass because the first pass could not produce a complete, source-backed dataset.
@@ -22,6 +24,26 @@ Search again from scratch with different English query wording and inspect direc
 Keep the same strict accuracy standard: never fill a missing row from memory or inference.`;
 
 type SourceCandidate = { title: string; url: string };
+type ConversationTurn = { role: "user" | "assistant"; content: string };
+
+function parseConversationHistory(value: unknown): ConversationTurn[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .slice(-12)
+    .flatMap((turn): ConversationTurn[] => {
+      if (!turn || typeof turn !== "object") return [];
+      const candidate = turn as { role?: unknown; content?: unknown };
+      if (
+        (candidate.role !== "user" && candidate.role !== "assistant") ||
+        typeof candidate.content !== "string"
+      ) {
+        return [];
+      }
+      const content = candidate.content.trim().slice(0, 1_000);
+      return content ? [{ role: candidate.role, content }] : [];
+    });
+}
 
 function collectSources(response: Awaited<ReturnType<ReturnType<typeof getOpenAIClient>["responses"]["parse"]>>) {
   const found = new Map<string, SourceCandidate>();
@@ -75,6 +97,7 @@ function friendlyError(error: unknown) {
 async function searchForWidget(
   client: ReturnType<typeof getOpenAIClient>,
   query: string,
+  history: ConversationTurn[],
   retry: boolean,
 ) {
   return client.responses.parse(
@@ -88,6 +111,7 @@ async function searchForWidget(
       input: [
         { role: "developer", content: SYSTEM_PROMPT },
         ...(retry ? [{ role: "developer" as const, content: RETRY_PROMPT }] : []),
+        ...history,
         { role: "user", content: query },
       ],
       text: {
@@ -107,9 +131,11 @@ export async function POST(request: Request) {
   }
 
   let query = "";
+  let history: ConversationTurn[] = [];
   try {
-    const body = (await request.json()) as { query?: unknown };
+    const body = (await request.json()) as { query?: unknown; history?: unknown };
     query = typeof body.query === "string" ? body.query.trim() : "";
+    history = parseConversationHistory(body.history);
   } catch {
     return Response.json({ error: "请求格式无效。" }, { status: 400 });
   }
@@ -123,7 +149,7 @@ export async function POST(request: Request) {
 
   try {
     const client = getOpenAIClient();
-    let response = await searchForWidget(client, query, false);
+    let response = await searchForWidget(client, query, history, false);
     let parsed = response.output_parsed;
     if (!parsed) {
       throw new Error("Structured response was empty");
@@ -135,7 +161,7 @@ export async function POST(request: Request) {
       (parsed.status === "success" && (!parsed.widget || sources.length === 0));
 
     if (needsResearchRetry) {
-      response = await searchForWidget(client, query, true);
+      response = await searchForWidget(client, query, history, true);
       parsed = response.output_parsed;
       if (!parsed) {
         throw new Error("Structured retry response was empty");
@@ -162,10 +188,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const { resolvedQuery, ...widgetData } = parsed.widget;
     const widget = widgetSpecSchema.parse({
-      ...parsed.widget,
+      ...widgetData,
       id: crypto.randomUUID(),
-      originalQuery: query,
+      originalQuery: resolvedQuery.trim().slice(0, 500) || query,
       sources,
       generatedAt: new Date().toISOString(),
     });

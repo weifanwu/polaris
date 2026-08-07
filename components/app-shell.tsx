@@ -50,11 +50,14 @@ function layoutsForWidgets(widgets: DashboardWidget[]) {
   );
 }
 
-async function requestWidget(query: string) {
+async function requestWidget(query: string, history: ChatMessage[] = []) {
   const response = await fetch("/api/generate-widget", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      history: history.slice(-12).map(({ role, content }) => ({ role, content })),
+    }),
   });
   const payload = (await response.json()) as GenerateWidgetResult & { error?: string };
   if (!response.ok) throw new Error(payload.error || "查询失败，请重试。");
@@ -121,7 +124,7 @@ export function AppShell() {
     const stageTimer = window.setTimeout(() => setLoadingStage("structuring"), 2_200);
 
     try {
-      const result = await requestWidget(cleanQuery);
+      const result = await requestWidget(cleanQuery, messages);
       if (result.status !== "success" || !result.widget) {
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),
@@ -164,7 +167,7 @@ export function AppShell() {
       window.clearTimeout(stageTimer);
       setLoadingStage(null);
     }
-  }, [loadingStage, query]);
+  }, [loadingStage, messages, query]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
