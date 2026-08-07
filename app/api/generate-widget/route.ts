@@ -12,9 +12,14 @@ export const runtime = "nodejs";
 
 const SYSTEM_PROMPT = `You turn a user's data question into exactly one dashboard widget.
 Use Web Search for current values, prices, economic data, market data, or recent events. Use only numbers directly supported by search results; never recall, estimate, interpolate, or invent values.
+For exact lists and time series, search with the relevant English name, ticker, or identifier in addition to the user's language. Prefer direct historical-data tables and primary or official sources. Run additional searches and open the most useful result pages until every requested row is supported; do not stop after a snippet that contains only part of the requested range.
 Prefer 3–30 comparable rows or time-series rows. Return no more than 6 columns and 30 rows. Every row must contain exactly one string cell per column. Mark each column's data type and unit. For line_chart and bar_chart, use the first column as the x-axis and make every remaining series numeric. For metric, place the primary numeric value in the first row's first numeric column. Choose table when the shape is not clearly chartable.
 If ambiguity would materially change the answer, return needs_clarification with widget null. If trustworthy search evidence is insufficient, return cannot_answer with widget null. A success response must contain a non-empty widget.
 Do not output Markdown, HTML, React, JavaScript, or commentary outside the schema.`;
+
+const RETRY_PROMPT = `This is a second research pass because the first pass could not produce a complete, source-backed dataset.
+Search again from scratch with different English query wording and inspect direct data pages rather than relying on search snippets. For market prices, prioritize historical quote tables from exchanges and established financial-data publishers and verify the requested completed trading dates. For economic data, prioritize the relevant central bank, statistics agency, or official release archive. Cross-check the full requested range when possible.
+Keep the same strict accuracy standard: never fill a missing row from memory or inference.`;
 
 type SourceCandidate = { title: string; url: string };
 
@@ -67,6 +72,32 @@ function friendlyError(error: unknown) {
   return [500, "生成组件时发生错误，请重试。"] as const;
 }
 
+async function searchForWidget(
+  client: ReturnType<typeof getOpenAIClient>,
+  query: string,
+  retry: boolean,
+) {
+  return client.responses.parse(
+    {
+      model: getOpenAIModel(),
+      reasoning: { effort: retry ? "high" : "medium" },
+      tools: [{ type: "web_search", search_context_size: "high" }],
+      tool_choice: "required",
+      max_tool_calls: retry ? 10 : 8,
+      include: ["web_search_call.action.sources"],
+      input: [
+        { role: "developer", content: SYSTEM_PROMPT },
+        ...(retry ? [{ role: "developer" as const, content: RETRY_PROMPT }] : []),
+        { role: "user", content: query },
+      ],
+      text: {
+        format: zodTextFormat(modelWidgetResultSchema, "polaris_widget_result"),
+      },
+    },
+    { timeout: 60_000 },
+  );
+}
+
 export async function POST(request: Request) {
   if (!process.env.OPENAI_API_KEY) {
     return Response.json(
@@ -92,27 +123,24 @@ export async function POST(request: Request) {
 
   try {
     const client = getOpenAIClient();
-    const response = await client.responses.parse(
-      {
-        model: getOpenAIModel(),
-        reasoning: { effort: "low" },
-        tools: [{ type: "web_search", search_context_size: "medium" }],
-        tool_choice: "required",
-        include: ["web_search_call.action.sources"],
-        input: [
-          { role: "developer", content: SYSTEM_PROMPT },
-          { role: "user", content: query },
-        ],
-        text: {
-          format: zodTextFormat(modelWidgetResultSchema, "polaris_widget_result"),
-        },
-      },
-      { timeout: 45_000 },
-    );
-
-    const parsed = response.output_parsed;
+    let response = await searchForWidget(client, query, false);
+    let parsed = response.output_parsed;
     if (!parsed) {
       throw new Error("Structured response was empty");
+    }
+
+    let sources = collectSources(response);
+    const needsResearchRetry =
+      parsed.status === "cannot_answer" ||
+      (parsed.status === "success" && (!parsed.widget || sources.length === 0));
+
+    if (needsResearchRetry) {
+      response = await searchForWidget(client, query, true);
+      parsed = response.output_parsed;
+      if (!parsed) {
+        throw new Error("Structured retry response was empty");
+      }
+      sources = collectSources(response);
     }
 
     if (parsed.status !== "success" || !parsed.widget) {
@@ -127,7 +155,6 @@ export async function POST(request: Request) {
       return Response.json(generateWidgetResultSchema.parse(result));
     }
 
-    const sources = collectSources(response);
     if (sources.length === 0) {
       return Response.json(
         { error: "搜索返回了数据，但没有可验证的来源链接，因此没有创建组件。" },
