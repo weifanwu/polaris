@@ -3,6 +3,7 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { getOpenAIClient, getOpenAIModel } from "@/lib/openai";
 import {
   generateWidgetResultSchema,
+  intentResolutionSchema,
   modelWidgetResultSchema,
   widgetSpecSchema,
   type GenerateWidgetResult,
@@ -10,13 +11,16 @@ import {
 
 export const runtime = "nodejs";
 
-const SYSTEM_PROMPT = `You turn a user's data question into exactly one dashboard widget.
-The input may include a multi-turn conversation. Treat the latest unresolved data request as the active goal. Merge follow-up answers with constraints established in earlier turns, including metric, geography, period, comparison groups, calculation method, and visualization choice. Never ask again for information the user already supplied. If the user says remaining choices are flexible, choose a sensible comparable default and state it in the subtitle or summary.
+const INTENT_PROMPT = `Resolve a multi-turn data-dashboard conversation before any web research.
+Treat the latest unresolved data request as the active goal. Merge follow-up answers with constraints established in earlier turns, including metric, geography, period, comparison groups, calculation method, and visualization choice. Never ask again for information the user already supplied. Ignore earlier requests that were already completed when a newer request is active.
+If the user says remaining choices are flexible or says an option does not matter, choose a sensible comparable default instead of asking about it again. Ask one concise follow-up only when a missing choice would materially change the requested dataset. Do not ask for optional details that can be handled with a reasonable default.
+When ready, resolvedQuery must be a concise, standalone restatement containing every material choice from the conversation. When clarification is needed, message must ask only for the still-missing information and resolvedQuery must summarize what is already known. Do not search the web or invent data.`;
+
+const SYSTEM_PROMPT = `You turn a fully resolved data request into exactly one dashboard widget.
 Use Web Search for current values, prices, economic data, market data, or recent events. Use only numbers directly supported by search results; never recall, estimate, interpolate, or invent values.
 For exact lists and time series, search with the relevant English name, ticker, or identifier in addition to the user's language. Prefer direct historical-data tables and primary or official sources. Run additional searches and open the most useful result pages until every requested row is supported; do not stop after a snippet that contains only part of the requested range.
 Prefer 3–30 comparable rows or time-series rows. Return no more than 6 columns and 30 rows. Every row must contain exactly one string cell per column. Mark each column's data type and unit. For line_chart and bar_chart, use the first column as the x-axis and make every remaining series numeric. For metric, place the primary numeric value in the first row's first numeric column. Choose table when the shape is not clearly chartable.
 If ambiguity would materially change the answer, return needs_clarification with widget null. If trustworthy search evidence is insufficient, return cannot_answer with widget null. A success response must contain a non-empty widget.
-For every success response, widget.resolvedQuery must be a concise, standalone restatement of the fully resolved request. It must include material choices learned from conversation history so the same widget can be refreshed later without the history.
 Do not output Markdown, HTML, React, JavaScript, or commentary outside the schema.`;
 
 const RETRY_PROMPT = `This is a second research pass because the first pass could not produce a complete, source-backed dataset.
@@ -97,7 +101,6 @@ function friendlyError(error: unknown) {
 async function searchForWidget(
   client: ReturnType<typeof getOpenAIClient>,
   query: string,
-  history: ConversationTurn[],
   retry: boolean,
 ) {
   return client.responses.parse(
@@ -111,7 +114,6 @@ async function searchForWidget(
       input: [
         { role: "developer", content: SYSTEM_PROMPT },
         ...(retry ? [{ role: "developer" as const, content: RETRY_PROMPT }] : []),
-        ...history,
         { role: "user", content: query },
       ],
       text: {
@@ -119,6 +121,28 @@ async function searchForWidget(
       },
     },
     { timeout: 60_000 },
+  );
+}
+
+async function resolveIntent(
+  client: ReturnType<typeof getOpenAIClient>,
+  query: string,
+  history: ConversationTurn[],
+) {
+  return client.responses.parse(
+    {
+      model: getOpenAIModel(),
+      reasoning: { effort: "low" },
+      input: [
+        { role: "developer", content: INTENT_PROMPT },
+        ...history,
+        { role: "user", content: query },
+      ],
+      text: {
+        format: zodTextFormat(intentResolutionSchema, "polaris_resolved_intent"),
+      },
+    },
+    { timeout: 20_000 },
   );
 }
 
@@ -132,10 +156,16 @@ export async function POST(request: Request) {
 
   let query = "";
   let history: ConversationTurn[] = [];
+  let skipClarification = false;
   try {
-    const body = (await request.json()) as { query?: unknown; history?: unknown };
+    const body = (await request.json()) as {
+      query?: unknown;
+      history?: unknown;
+      skipClarification?: unknown;
+    };
     query = typeof body.query === "string" ? body.query.trim() : "";
     history = parseConversationHistory(body.history);
+    skipClarification = body.skipClarification === true;
   } catch {
     return Response.json({ error: "请求格式无效。" }, { status: 400 });
   }
@@ -149,7 +179,27 @@ export async function POST(request: Request) {
 
   try {
     const client = getOpenAIClient();
-    let response = await searchForWidget(client, query, history, false);
+    let resolvedQuery = query;
+
+    if (!skipClarification) {
+      const intentResponse = await resolveIntent(client, query, history);
+      const intent = intentResponse.output_parsed;
+      if (!intent) {
+        throw new Error("Structured intent response was empty");
+      }
+      if (intent.status === "needs_clarification") {
+        return Response.json(
+          generateWidgetResultSchema.parse({
+            status: "needs_clarification",
+            message: intent.message,
+            widget: null,
+          }),
+        );
+      }
+      resolvedQuery = intent.resolvedQuery.trim().slice(0, 500) || query;
+    }
+
+    let response = await searchForWidget(client, resolvedQuery, false);
     let parsed = response.output_parsed;
     if (!parsed) {
       throw new Error("Structured response was empty");
@@ -161,7 +211,7 @@ export async function POST(request: Request) {
       (parsed.status === "success" && (!parsed.widget || sources.length === 0));
 
     if (needsResearchRetry) {
-      response = await searchForWidget(client, query, history, true);
+      response = await searchForWidget(client, resolvedQuery, true);
       parsed = response.output_parsed;
       if (!parsed) {
         throw new Error("Structured retry response was empty");
@@ -188,11 +238,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { resolvedQuery, ...widgetData } = parsed.widget;
     const widget = widgetSpecSchema.parse({
-      ...widgetData,
+      ...parsed.widget,
       id: crypto.randomUUID(),
-      originalQuery: resolvedQuery.trim().slice(0, 500) || query,
+      originalQuery: resolvedQuery,
       sources,
       generatedAt: new Date().toISOString(),
     });

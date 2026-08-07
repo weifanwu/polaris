@@ -65,6 +65,12 @@ export const generateWidgetResultSchema = z.object({
   widget: widgetSpecSchema.nullable(),
 });
 
+export const intentResolutionSchema = z.object({
+  status: z.enum(["ready", "needs_clarification"]),
+  message: z.string(),
+  resolvedQuery: z.string(),
+});
+
 // Keep the model-facing schema within Structured Outputs' supported JSON Schema subset.
 export const modelWidgetResultSchema = z.object({
   status: z.enum(["success", "needs_clarification", "cannot_answer"]),
@@ -84,7 +90,6 @@ export const modelWidgetResultSchema = z.object({
       ),
       rows: z.array(z.object({ cells: z.array(z.string()) })),
       summary: z.string(),
-      resolvedQuery: z.string(),
     })
     .nullable(),
 });

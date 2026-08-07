@@ -50,13 +50,18 @@ function layoutsForWidgets(widgets: DashboardWidget[]) {
   );
 }
 
-async function requestWidget(query: string, history: ChatMessage[] = []) {
+async function requestWidget(
+  query: string,
+  history: ChatMessage[] = [],
+  skipClarification = false,
+) {
   const response = await fetch("/api/generate-widget", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
       history: history.slice(-12).map(({ role, content }) => ({ role, content })),
+      skipClarification,
     }),
   });
   const payload = (await response.json()) as GenerateWidgetResult & { error?: string };
@@ -176,7 +181,7 @@ export function AppShell() {
     setRefreshingIds((current) => new Set(current).add(id));
     setRefreshErrors((current) => ({ ...current, [id]: "" }));
     try {
-      const result = await requestWidget(existing.originalQuery);
+      const result = await requestWidget(existing.originalQuery, [], true);
       if (result.status !== "success" || !result.widget) {
         throw new Error(result.message);
       }
