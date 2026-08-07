@@ -1,6 +1,14 @@
 "use client";
 
-import { ExternalLink, GripHorizontal, RefreshCw, Trash2 } from "lucide-react";
+import {
+  ExternalLink,
+  GripHorizontal,
+  Maximize2,
+  Minimize2,
+  MoveDiagonal2,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import type { DashboardWidget } from "@/types";
 import { BarWidget } from "./widgets/bar-widget";
 import { DataTable } from "./widgets/data-table";
@@ -11,8 +19,10 @@ type Props = {
   widget: DashboardWidget;
   refreshing: boolean;
   refreshError?: string;
+  focused: boolean;
   onDelete: () => void;
   onRefresh: () => void;
+  onToggleFocus: () => void;
 };
 
 function WidgetContent({ widget }: { widget: DashboardWidget }) {
@@ -32,12 +42,17 @@ export function WidgetCard({
   widget,
   refreshing,
   refreshError,
+  focused,
   onDelete,
   onRefresh,
+  onToggleFocus,
 }: Props) {
   return (
-    <article className="widget-card" id={`widget-${widget.id}`}>
-      <header className="widget-header widget-drag-handle">
+    <article
+      className={`widget-card ${focused ? "focused" : ""}`}
+      id={focused ? undefined : `widget-${widget.id}`}
+    >
+      <header className={`widget-header ${focused ? "" : "widget-drag-handle"}`}>
         <div className="widget-heading">
           <span className="drag-mark" aria-hidden="true"><GripHorizontal size={15} /></span>
           <div>
@@ -49,6 +64,14 @@ export function WidgetCard({
           </div>
         </div>
         <div className="widget-actions">
+          <button
+            className="icon-button"
+            onClick={onToggleFocus}
+            aria-label={`${focused ? "Restore" : "Expand"} ${widget.title}`}
+            title={focused ? "Restore widget" : "Expand widget"}
+          >
+            {focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
           <button
             className="icon-button"
             onClick={onRefresh}
@@ -85,6 +108,11 @@ export function WidgetCard({
             <span className="source-missing">Source unavailable</span>
           )}
         </div>
+        {!focused ? (
+          <span className="resize-cue" title="Drag any edge or corner to resize">
+            <MoveDiagonal2 size={11} /> Resize
+          </span>
+        ) : null}
         <time dateTime={widget.generatedAt}>
           {new Intl.DateTimeFormat("en-CA", {
             month: "short",

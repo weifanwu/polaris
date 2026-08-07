@@ -15,9 +15,9 @@ const BREAKPOINT_COLS = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 } as const;
 
 function widgetSize(widget: DashboardWidget, columns: number) {
   if (widget.visualization === "metric") {
-    return { w: Math.min(4, columns), h: 8 };
+    return { w: Math.min(3, columns), h: 7 };
   }
-  return { w: Math.min(6, columns), h: 13 };
+  return { w: Math.min(6, columns), h: 14 };
 }
 
 function addWidgetToLayouts(
@@ -35,8 +35,8 @@ function addWidgetToLayouts(
       y: bottom,
       w: size.w,
       h: size.h,
-      minW: Math.min(widget.visualization === "metric" ? 2 : 3, columns),
-      minH: widget.visualization === "metric" ? 6 : 9,
+      minW: Math.min(2, columns),
+      minH: widget.visualization === "metric" ? 5 : 7,
     };
     next[breakpoint] = [...current, item];
   }

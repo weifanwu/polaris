@@ -22,12 +22,25 @@ export function loadDashboard(): StoredDashboard {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyDashboard;
     const parsed = JSON.parse(raw) as Partial<StoredDashboard>;
+    const widgets = Array.isArray(parsed.widgets) ? parsed.widgets : [];
+    const widgetById = new Map(widgets.map((widget) => [widget.id, widget]));
+    const layouts =
+      parsed.layouts && typeof parsed.layouts === "object"
+        ? Object.fromEntries(
+            Object.entries(parsed.layouts).map(([breakpoint, layout]) => [
+              breakpoint,
+              layout?.map((item) => ({
+                ...item,
+                minW: Math.min(2, item.minW ?? 2),
+                minH:
+                  widgetById.get(item.i)?.visualization === "metric" ? 5 : 7,
+              })),
+            ]),
+          )
+        : {};
     return {
-      widgets: Array.isArray(parsed.widgets) ? parsed.widgets : [],
-      layouts:
-        parsed.layouts && typeof parsed.layouts === "object"
-          ? parsed.layouts
-          : {},
+      widgets,
+      layouts,
       messages: Array.isArray(parsed.messages)
         ? parsed.messages.slice(-20)
         : [],

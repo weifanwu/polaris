@@ -177,9 +177,30 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 /* Widgets */
 .react-grid-item { transition: all 180ms ease; }
 .react-grid-item.react-grid-placeholder { border-radius: 13px; background: rgba(34, 211, 238, .12); border: 1px dashed var(--cyan); opacity: 1; }
-.react-grid-item > .react-resizable-handle::after { width: 7px; height: 7px; right: 6px; bottom: 6px; border-right-color: #54707b; border-bottom-color: #54707b; }
+.react-grid-item > .react-resizable-handle { opacity: .24; transition: opacity 140ms ease, background-color 140ms ease; }
+.react-grid-item:hover > .react-resizable-handle,
+.react-grid-item.resizing > .react-resizable-handle { opacity: 1; }
+.react-grid-item > .react-resizable-handle::after { width: 7px; height: 7px; right: 6px; bottom: 6px; border-right-color: #6f909b; border-bottom-color: #6f909b; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-n,
+.react-grid-item > .react-resizable-handle.react-resizable-handle-s { left: 26px; width: calc(100% - 52px); height: 8px; margin-left: 0; transform: none; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-e,
+.react-grid-item > .react-resizable-handle.react-resizable-handle-w { top: 26px; width: 8px; height: calc(100% - 52px); margin-top: 0; transform: none; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-n { top: -3px; cursor: ns-resize; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-s { bottom: -3px; cursor: ns-resize; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-e { right: -3px; cursor: ew-resize; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-w { left: -3px; cursor: ew-resize; }
+.react-grid-item > .react-resizable-handle-n::after,
+.react-grid-item > .react-resizable-handle-s::after,
+.react-grid-item > .react-resizable-handle-e::after,
+.react-grid-item > .react-resizable-handle-w::after { display: none; }
+.react-grid-item > .react-resizable-handle-n:hover,
+.react-grid-item > .react-resizable-handle-s:hover { background: linear-gradient(90deg, transparent, rgba(34, 211, 238, .55), transparent); }
+.react-grid-item > .react-resizable-handle-e:hover,
+.react-grid-item > .react-resizable-handle-w:hover { background: linear-gradient(transparent, rgba(34, 211, 238, .55), transparent); }
 .widget-card { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(145deg, #10171d 0%, #0d1318 70%); box-shadow: 0 14px 35px rgba(0,0,0,.18); }
 .widget-card:hover { border-color: var(--line-bright); }
+.widget-card.focused { border-color: #334650; box-shadow: 0 28px 90px rgba(0, 0, 0, .58); }
+.widget-card.focused .widget-header { cursor: default; }
 .widget-header { min-height: 66px; padding: 13px 14px 10px; display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid rgba(32, 42, 51, .8); cursor: grab; }
 .widget-header:active { cursor: grabbing; }
 .widget-heading { display: flex; align-items: flex-start; min-width: 0; gap: 8px; }
@@ -214,8 +235,34 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .source-list a:hover { color: var(--cyan); }
 .local-source, .source-missing { color: var(--dim); font-size: 8px; }
 .source-missing { color: var(--red); }
+.resize-cue { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: #60727d; font-size: 8px; letter-spacing: .04em; }
+.widget-card:hover .resize-cue { color: #8ea5af; }
 .widget-footer time { flex: 0 0 auto; color: var(--dim); font-family: var(--font-geist-mono), monospace; font-size: 8px; }
 .widget-error { position: absolute; left: 10px; right: 10px; bottom: 43px; padding: 7px 9px; color: #fecdd3; border: 1px solid rgba(251, 113, 133, .35); border-radius: 7px; background: rgba(61, 17, 27, .94); font-size: 9px; }
+
+.widget-focus-open { overflow: hidden; }
+.widget-focus-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 5vh 4vw;
+  background: rgba(2, 5, 7, .82);
+  backdrop-filter: blur(12px);
+  animation: focus-in 150ms ease-out;
+}
+.widget-focus-frame {
+  width: min(1400px, 92vw);
+  height: min(860px, 88vh);
+  min-height: 480px;
+}
+.widget-focus-frame .widget-header { min-height: 72px; padding: 16px 18px 12px; }
+.widget-focus-frame .widget-title-row h3 { font-size: 16px; }
+.widget-focus-frame .widget-heading p { font-size: 11px; }
+.widget-focus-frame .widget-content { padding: 18px 20px 12px; }
+.widget-focus-frame .widget-footer { min-height: 46px; padding-inline: 18px; }
+@keyframes focus-in { from { opacity: 0; } }
 
 /* Chat */
 .chat-panel { width: 390px; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #0a0f13; transition: width 180ms ease; }

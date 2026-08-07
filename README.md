@@ -28,10 +28,12 @@ API key 只在服务端 route 中读取。没有 key 时，界面会显示 `Miss
 1. 在右侧输入一个数据问题。
 2. 服务端通过 OpenAI Responses API 和 hosted Web Search 获取当前数据。
 3. Structured Outputs 生成经过 Zod 校验的 `WidgetSpec`。
-4. 组件被加入画布，可拖拽、缩放、删除并保存到 `localStorage`。
+4. 组件被加入画布，可拖拽、从八个方向缩放、全屏查看、删除并保存到 `localStorage`。
 5. Refresh 用原始问题重新查询；失败时保留旧数据。
 
 支持 `table`、`line_chart`、`bar_chart` 和 `metric`。每个真实组件展示最多五个来自 API 响应的可点击来源。
+
+组件四边与四角都可拖动，最小尺寸会根据内容类型保护可读性；标题栏的展开按钮提供不改变画布布局的专注查看模式，按 `Esc` 即可退出。
 
 ## 验证
 
