@@ -93,6 +93,16 @@ export function ChatPanel({
                 <div>
                   <span>{message.role === "user" ? "YOU" : "POLARIS"}</span>
                   <p>{message.content}</p>
+                  {message.usage ? (
+                    <small className="message-usage">
+                      {message.usage.inputTokens.toLocaleString()} input
+                      {message.usage.cachedInputTokens > 0
+                        ? ` · ${message.usage.cachedInputTokens.toLocaleString()} cached`
+                        : ""}
+                      {` · ${message.usage.modelCalls} call${message.usage.modelCalls === 1 ? "" : "s"}`}
+                      {` · ${message.usage.webSearchCalls} search${message.usage.webSearchCalls === 1 ? "" : "es"}`}
+                    </small>
+                  ) : null}
                   {message.widgetId ? (
                     <button className="focus-widget" onClick={() => onFocusWidget(message.widgetId!)}>View widget <ChevronRight size={12} /></button>
                   ) : null}

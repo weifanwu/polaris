@@ -52,6 +52,7 @@ function layoutsForWidgets(widgets: DashboardWidget[]) {
 
 async function requestWidget(
   query: string,
+  conversationContext = "",
   history: ChatMessage[] = [],
   skipClarification = false,
 ) {
@@ -60,7 +61,13 @@ async function requestWidget(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
-      history: history.slice(-12).map(({ role, content }) => ({ role, content })),
+      conversationContext,
+      history: conversationContext
+        ? []
+        : history.slice(-4).map(({ role, content }) => ({
+            role,
+            content: content.slice(0, 400),
+          })),
       skipClarification,
     }),
   });
@@ -74,6 +81,9 @@ export function AppShell() {
   const [widgets, setWidgets] = useState<DashboardWidget[]>(emptyDashboard.widgets);
   const [layouts, setLayouts] = useState<ResponsiveLayouts>(emptyDashboard.layouts);
   const [messages, setMessages] = useState<ChatMessage[]>(emptyDashboard.messages);
+  const [conversationContext, setConversationContext] = useState(
+    emptyDashboard.conversationContext,
+  );
   const [query, setQuery] = useState("");
   const [loadingStage, setLoadingStage] = useState<"searching" | "structuring" | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
@@ -87,6 +97,7 @@ export function AppShell() {
     setWidgets(stored.widgets);
     setLayouts(stored.layouts);
     setMessages(stored.messages);
+    setConversationContext(stored.conversationContext);
     setHydrated(true);
 
     fetch("/api/health")
@@ -97,8 +108,8 @@ export function AppShell() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveDashboard({ widgets, layouts, messages });
-  }, [hydrated, layouts, messages, widgets]);
+    saveDashboard({ widgets, layouts, messages, conversationContext });
+  }, [conversationContext, hydrated, layouts, messages, widgets]);
 
   const latestGeneratedAt = useMemo(() => {
     if (!widgets.length) return null;
@@ -129,13 +140,21 @@ export function AppShell() {
     const stageTimer = window.setTimeout(() => setLoadingStage("structuring"), 2_200);
 
     try {
-      const result = await requestWidget(cleanQuery, messages);
+      const result = await requestWidget(
+        cleanQuery,
+        conversationContext,
+        messages,
+      );
+      if (typeof result.conversationContext === "string") {
+        setConversationContext(result.conversationContext);
+      }
       if (result.status !== "success" || !result.widget) {
         const assistantMessage: ChatMessage = {
           id: crypto.randomUUID(),
           role: "assistant",
           content: result.message,
           tone: result.status === "cannot_answer" ? "error" : "normal",
+          usage: result.usage,
         };
         setMessages((current) => [
           ...current,
@@ -152,6 +171,7 @@ export function AppShell() {
         role: "assistant",
         content: result.message || `Created “${widget.title}”.`,
         widgetId: widget.id,
+        usage: result.usage,
       };
       setMessages((current) => [
         ...current,
@@ -172,7 +192,7 @@ export function AppShell() {
       window.clearTimeout(stageTimer);
       setLoadingStage(null);
     }
-  }, [loadingStage, messages, query]);
+  }, [conversationContext, loadingStage, messages, query]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
@@ -181,7 +201,12 @@ export function AppShell() {
     setRefreshingIds((current) => new Set(current).add(id));
     setRefreshErrors((current) => ({ ...current, [id]: "" }));
     try {
-      const result = await requestWidget(existing.originalQuery, [], true);
+      const ageMs = Date.now() - new Date(existing.generatedAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs < 5 * 60 * 1_000) {
+        throw new Error("这个组件在 5 分钟内刚更新过。为避免重复费用，请稍后再刷新。");
+      }
+
+      const result = await requestWidget(existing.originalQuery, "", [], true);
       if (result.status !== "success" || !result.widget) {
         throw new Error(result.message);
       }
@@ -217,6 +242,7 @@ export function AppShell() {
   const loadDemo = useCallback(() => {
     setWidgets(demoWidgets);
     setLayouts(layoutsForWidgets(demoWidgets));
+    setConversationContext("");
     setMessages([{
       id: crypto.randomUUID(),
       role: "assistant",
@@ -228,11 +254,13 @@ export function AppShell() {
     setWidgets([]);
     setLayouts({});
     setMessages([]);
+    setConversationContext("");
     setRefreshErrors({});
   }, []);
 
   const clearConversation = useCallback(() => {
     setMessages([]);
+    setConversationContext("");
   }, []);
 
   return (

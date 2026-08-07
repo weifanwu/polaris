@@ -14,3 +14,11 @@ export function getOpenAIClient() {
 export function getOpenAIModel() {
   return process.env.OPENAI_MODEL?.trim() || "gpt-5.6";
 }
+
+export function getOpenAIIntentModel() {
+  return process.env.OPENAI_INTENT_MODEL?.trim() || "gpt-5.6-luna";
+}
+
+export function getOpenAIFastModel() {
+  return process.env.OPENAI_FAST_MODEL?.trim() || "gpt-5.6-terra";
+}

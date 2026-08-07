@@ -7,12 +7,14 @@ export type StoredDashboard = {
   widgets: DashboardWidget[];
   layouts: ResponsiveLayouts;
   messages: ChatMessage[];
+  conversationContext: string;
 };
 
 export const emptyDashboard: StoredDashboard = {
   widgets: [],
   layouts: {},
   messages: [],
+  conversationContext: "",
 };
 
 export function loadDashboard(): StoredDashboard {
@@ -44,6 +46,10 @@ export function loadDashboard(): StoredDashboard {
       messages: Array.isArray(parsed.messages)
         ? parsed.messages.slice(-20)
         : [],
+      conversationContext:
+        typeof parsed.conversationContext === "string"
+          ? parsed.conversationContext.slice(0, 500)
+          : "",
     };
   } catch {
     return emptyDashboard;
@@ -54,6 +60,10 @@ export function saveDashboard(state: StoredDashboard) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ ...state, messages: state.messages.slice(-20) }),
+    JSON.stringify({
+      ...state,
+      messages: state.messages.slice(-20),
+      conversationContext: state.conversationContext.slice(0, 500),
+    }),
   );
 }

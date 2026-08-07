@@ -63,12 +63,24 @@ export const generateWidgetResultSchema = z.object({
   status: z.enum(["success", "needs_clarification", "cannot_answer"]),
   message: z.string().min(1).max(500),
   widget: widgetSpecSchema.nullable(),
+  conversationContext: z.string().max(500).optional(),
+  usage: z
+    .object({
+      inputTokens: z.number().int().nonnegative(),
+      cachedInputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      webSearchCalls: z.number().int().nonnegative(),
+      modelCalls: z.number().int().positive(),
+    })
+    .optional(),
 });
 
 export const intentResolutionSchema = z.object({
   status: z.enum(["ready", "needs_clarification"]),
   message: z.string(),
   resolvedQuery: z.string(),
+  researchMode: z.enum(["simple", "complex"]),
+  allowPartialData: z.boolean(),
 });
 
 // Keep the model-facing schema within Structured Outputs' supported JSON Schema subset.
@@ -97,3 +109,4 @@ export const modelWidgetResultSchema = z.object({
 export type WidgetSpec = z.infer<typeof widgetSpecSchema>;
 export type GenerateWidgetResult = z.infer<typeof generateWidgetResultSchema>;
 export type ModelWidgetResult = z.infer<typeof modelWidgetResultSchema>;
+export type RequestUsage = NonNullable<GenerateWidgetResult["usage"]>;

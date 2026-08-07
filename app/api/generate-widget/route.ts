@@ -1,55 +1,72 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
-import { getOpenAIClient, getOpenAIModel } from "@/lib/openai";
+import {
+  inferPartialDataPolicy,
+  inferResearchMode,
+  parseConversationContext,
+  parseConversationHistory,
+  type ConversationTurn,
+  type ResearchMode,
+} from "@/lib/agent-policy";
+import {
+  getOpenAIClient,
+  getOpenAIFastModel,
+  getOpenAIIntentModel,
+  getOpenAIModel,
+} from "@/lib/openai";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
   modelWidgetResultSchema,
   widgetSpecSchema,
   type GenerateWidgetResult,
+  type RequestUsage,
 } from "@/lib/widget-schema";
 
 export const runtime = "nodejs";
 
-const INTENT_PROMPT = `Resolve a multi-turn data-dashboard conversation before any web research.
-Treat the latest unresolved data request as the active goal. Merge follow-up answers with constraints established in earlier turns, including metric, geography, period, comparison groups, calculation method, and visualization choice. Never ask again for information the user already supplied. Ignore earlier requests that were already completed when a newer request is active.
-If the user says remaining choices are flexible or says an option does not matter, choose a sensible comparable default instead of asking about it again. Ask one concise follow-up only when a missing choice would materially change the requested dataset. Do not ask for optional details that can be handled with a reasonable default.
-When ready, resolvedQuery must be a concise, standalone restatement containing every material choice from the conversation. When clarification is needed, message must ask only for the still-missing information and resolvedQuery must summarize what is already known. Do not search the web or invent data.`;
+const INTENT_PROMPT = `Goal: turn the latest user message plus compact conversation state into one standalone data request.
 
-const SYSTEM_PROMPT = `You turn a fully resolved data request into exactly one dashboard widget.
-Use Web Search for current values, prices, economic data, market data, or recent events. Use only numbers directly supported by search results; never recall, estimate, interpolate, or invent values.
-For exact lists and time series, search with the relevant English name, ticker, or identifier in addition to the user's language. Prefer direct historical-data tables and primary or official sources. Run additional searches and open the most useful result pages until every requested row is supported; do not stop after a snippet that contains only part of the requested range.
-Prefer 3–30 comparable rows or time-series rows. Return no more than 6 columns and 30 rows. Every row must contain exactly one string cell per column. Mark each column's data type and unit. For line_chart and bar_chart, use the first column as the x-axis and make every remaining series numeric. For metric, place the primary numeric value in the first row's first numeric column. Choose table when the shape is not clearly chartable.
-If ambiguity would materially change the answer, return needs_clarification with widget null. If trustworthy search evidence is insufficient, return cannot_answer with widget null. A success response must contain a non-empty widget.
-Do not output Markdown, HTML, React, JavaScript, or commentary outside the schema.`;
+Success criteria:
+- Preserve supplied metric, geography, comparison groups, period, calculation, source preference, and chart type.
+- Never ask again for a supplied choice. If the user says remaining choices are flexible, choose a comparable default.
+- Ask one short question only when a missing choice materially changes the dataset.
+- Treat a new unrelated request as a replacement for the prior context.
+- Set researchMode to complex for multi-source comparisons, long monthly histories, derived calculations, or fragmented datasets; otherwise simple.
+- Set allowPartialData true unless the user explicitly requires a complete uninterrupted dataset. "Use what is available" always means true.
 
-const RETRY_PROMPT = `This is a second research pass because the first pass could not produce a complete, source-backed dataset.
-Search again from scratch with different English query wording and inspect direct data pages rather than relying on search snippets. For market prices, prioritize historical quote tables from exchanges and established financial-data publishers and verify the requested completed trading dates. For economic data, prioritize the relevant central bank, statistics agency, or official release archive. Cross-check the full requested range when possible.
-Keep the same strict accuracy standard: never fill a missing row from memory or inference.`;
+resolvedQuery is the compact conversation memory: include all known constraints whether ready or awaiting clarification. Do not search or invent data.`;
+
+const SYSTEM_PROMPT = `Goal: create one source-backed dashboard widget from a resolved data request using Web Search.
+
+Success criteria:
+- Search with concise English identifiers as needed and prefer official or primary data pages.
+- Use only retrieved numbers. Never recall, estimate, interpolate, or silently convert missing values to zero.
+- Return 2–30 useful rows when charting a series, no more than 6 columns, and exactly one string cell per column.
+- For charts, the first column is the x-axis and remaining series are numeric. Use an empty string for a genuinely missing numeric value.
+- Stop as soon as the available evidence can answer the core request usefully. Search again only for a missing required fact or comparison series.
+- For fragmented series, split searches by source, entity, or date range instead of repeating the same broad query.
+- You may calculate requested arithmetic from retrieved values. For month-over-month change, require both adjacent verified months and omit the calculation when either month is missing.
+- If partial data is allowed, do not reject a useful chart because some requested dates are unavailable. Include verified rows, preserve gaps, and state the actual coverage and omissions in the subtitle or summary.
+- For comparisons, align matching dates when possible. Rows may contain one verified series and one empty cell when coverage differs.
+- Return cannot_answer only when fewer than two useful chart rows can be verified, no trustworthy source exists, or the result cannot be rendered honestly.
+
+Output only the required structured result. Every success must contain a non-empty widget.`;
 
 type SourceCandidate = { title: string; url: string };
-type ConversationTurn = { role: "user" | "assistant"; content: string };
+type ParsedResponse = Awaited<
+  ReturnType<ReturnType<typeof getOpenAIClient>["responses"]["parse"]>
+>;
 
-function parseConversationHistory(value: unknown): ConversationTurn[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .slice(-12)
-    .flatMap((turn): ConversationTurn[] => {
-      if (!turn || typeof turn !== "object") return [];
-      const candidate = turn as { role?: unknown; content?: unknown };
-      if (
-        (candidate.role !== "user" && candidate.role !== "assistant") ||
-        typeof candidate.content !== "string"
-      ) {
-        return [];
-      }
-      const content = candidate.content.trim().slice(0, 1_000);
-      return content ? [{ role: candidate.role, content }] : [];
-    });
+function safeHostname(url: string) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "Source";
+  }
 }
 
-function collectSources(response: Awaited<ReturnType<ReturnType<typeof getOpenAIClient>["responses"]["parse"]>>) {
+function collectSources(response: ParsedResponse) {
   const found = new Map<string, SourceCandidate>();
 
   for (const item of response.output) {
@@ -57,7 +74,7 @@ function collectSources(response: Awaited<ReturnType<ReturnType<typeof getOpenAI
       for (const source of item.action.sources ?? []) {
         if (source.url) {
           found.set(source.url, {
-            title: new URL(source.url).hostname,
+            title: safeHostname(source.url),
             url: source.url,
           });
         }
@@ -70,7 +87,7 @@ function collectSources(response: Awaited<ReturnType<ReturnType<typeof getOpenAI
         for (const annotation of content.annotations) {
           if (annotation.type === "url_citation") {
             found.set(annotation.url, {
-              title: annotation.title || new URL(annotation.url).hostname,
+              title: annotation.title || safeHostname(annotation.url),
               url: annotation.url,
             });
           }
@@ -82,6 +99,36 @@ function collectSources(response: Awaited<ReturnType<ReturnType<typeof getOpenAI
   return Array.from(found.values()).slice(0, 5);
 }
 
+function readUsage(response: ParsedResponse): RequestUsage {
+  const usage = response.usage;
+  return {
+    inputTokens: usage?.input_tokens ?? 0,
+    cachedInputTokens: usage?.input_tokens_details.cached_tokens ?? 0,
+    outputTokens: usage?.output_tokens ?? 0,
+    webSearchCalls: response.output.filter((item) => item.type === "web_search_call").length,
+    modelCalls: 1,
+  };
+}
+
+function addUsage(...items: RequestUsage[]): RequestUsage {
+  return items.reduce<RequestUsage>(
+    (total, item) => ({
+      inputTokens: total.inputTokens + item.inputTokens,
+      cachedInputTokens: total.cachedInputTokens + item.cachedInputTokens,
+      outputTokens: total.outputTokens + item.outputTokens,
+      webSearchCalls: total.webSearchCalls + item.webSearchCalls,
+      modelCalls: total.modelCalls + item.modelCalls,
+    }),
+    {
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      outputTokens: 0,
+      webSearchCalls: 0,
+      modelCalls: 0,
+    },
+  );
+}
+
 function friendlyError(error: unknown) {
   if (error instanceof OpenAI.AuthenticationError) {
     return [401, "OpenAI API key 无效，请检查 OPENAI_API_KEY。"] as const;
@@ -90,7 +137,7 @@ function friendlyError(error: unknown) {
     return [429, "OpenAI 请求过于频繁或额度不足，请稍后再试。"] as const;
   }
   if (error instanceof OpenAI.APIConnectionTimeoutError) {
-    return [504, "Web 搜索超时了，请缩小问题范围后重试。"] as const;
+    return [504, "本次检索达到时间预算，已停止继续消耗。可以缩小范围或接受部分数据后重试。"] as const;
   }
   if (error instanceof OpenAI.APIError) {
     return [502, "OpenAI 暂时无法完成这次查询，请稍后再试。"] as const;
@@ -101,48 +148,71 @@ function friendlyError(error: unknown) {
 async function searchForWidget(
   client: ReturnType<typeof getOpenAIClient>,
   query: string,
-  retry: boolean,
+  researchMode: ResearchMode,
+  allowPartialData: boolean,
 ) {
+  const complex = researchMode === "complex";
+  const researchBrief = `Research budget: ${complex ? "complex, at most 6 web searches" : "simple, at most 3 web searches"}.
+Partial verified rows: ${allowPartialData ? "allowed and preferred over failure" : "not allowed; the requested range must be complete"}.`;
+
   return client.responses.parse(
     {
-      model: getOpenAIModel(),
-      reasoning: { effort: retry ? "high" : "medium" },
-      tools: [{ type: "web_search", search_context_size: "high" }],
+      model: complex ? getOpenAIModel() : getOpenAIFastModel(),
+      reasoning: { effort: "low" },
+      tools: [
+        {
+          type: "web_search",
+          search_context_size: complex ? "medium" : "low",
+        },
+      ],
       tool_choice: "required",
-      max_tool_calls: retry ? 10 : 8,
+      max_tool_calls: complex ? 6 : 3,
+      max_output_tokens: 6_000,
+      prompt_cache_key: complex
+        ? "polaris-research-complex-v3"
+        : "polaris-research-simple-v3",
       include: ["web_search_call.action.sources"],
       input: [
         { role: "developer", content: SYSTEM_PROMPT },
-        ...(retry ? [{ role: "developer" as const, content: RETRY_PROMPT }] : []),
+        { role: "developer", content: researchBrief },
         { role: "user", content: query },
       ],
       text: {
+        verbosity: "low",
         format: zodTextFormat(modelWidgetResultSchema, "polaris_widget_result"),
       },
     },
-    { timeout: 60_000 },
+    { timeout: complex ? 75_000 : 45_000 },
   );
 }
 
 async function resolveIntent(
   client: ReturnType<typeof getOpenAIClient>,
   query: string,
-  history: ConversationTurn[],
+  conversationContext: string,
+  fallbackHistory: ConversationTurn[],
 ) {
+  const compactState = conversationContext
+    ? [{ role: "developer" as const, content: `Known conversation state: ${conversationContext}` }]
+    : fallbackHistory;
+
   return client.responses.parse(
     {
-      model: getOpenAIModel(),
-      reasoning: { effort: "low" },
+      model: getOpenAIIntentModel(),
+      reasoning: { effort: "none" },
+      max_output_tokens: 500,
+      prompt_cache_key: "polaris-intent-v3",
       input: [
         { role: "developer", content: INTENT_PROMPT },
-        ...history,
+        ...compactState,
         { role: "user", content: query },
       ],
       text: {
+        verbosity: "low",
         format: zodTextFormat(intentResolutionSchema, "polaris_resolved_intent"),
       },
     },
-    { timeout: 20_000 },
+    { timeout: 15_000 },
   );
 }
 
@@ -155,15 +225,18 @@ export async function POST(request: Request) {
   }
 
   let query = "";
+  let conversationContext = "";
   let history: ConversationTurn[] = [];
   let skipClarification = false;
   try {
     const body = (await request.json()) as {
       query?: unknown;
+      conversationContext?: unknown;
       history?: unknown;
       skipClarification?: unknown;
     };
     query = typeof body.query === "string" ? body.query.trim() : "";
+    conversationContext = parseConversationContext(body.conversationContext);
     history = parseConversationHistory(body.history);
     skipClarification = body.skipClarification === true;
   } catch {
@@ -180,62 +253,72 @@ export async function POST(request: Request) {
   try {
     const client = getOpenAIClient();
     let resolvedQuery = query;
+    let researchMode = inferResearchMode(query);
+    let allowPartialData = inferPartialDataPolicy(query);
+    let intentUsage: RequestUsage | null = null;
 
     if (!skipClarification) {
-      const intentResponse = await resolveIntent(client, query, history);
+      const intentResponse = await resolveIntent(
+        client,
+        query,
+        conversationContext,
+        history,
+      );
+      intentUsage = readUsage(intentResponse);
       const intent = intentResponse.output_parsed;
       if (!intent) {
         throw new Error("Structured intent response was empty");
       }
+
+      const nextContext = intent.resolvedQuery.trim().slice(0, 500) || query;
       if (intent.status === "needs_clarification") {
         return Response.json(
           generateWidgetResultSchema.parse({
             status: "needs_clarification",
-            message: intent.message,
+            message: intent.message.trim().slice(0, 500),
             widget: null,
+            conversationContext: nextContext,
+            usage: intentUsage,
           }),
         );
       }
-      resolvedQuery = intent.resolvedQuery.trim().slice(0, 500) || query;
+
+      resolvedQuery = nextContext;
+      researchMode = intent.researchMode;
+      allowPartialData = intent.allowPartialData;
     }
 
-    let response = await searchForWidget(client, resolvedQuery, false);
-    let parsed = response.output_parsed;
+    const response = await searchForWidget(
+      client,
+      resolvedQuery,
+      researchMode,
+      allowPartialData,
+    );
+    const parsed = response.output_parsed;
     if (!parsed) {
       throw new Error("Structured response was empty");
     }
 
-    let sources = collectSources(response);
-    const needsResearchRetry =
-      parsed.status === "cannot_answer" ||
-      (parsed.status === "success" && (!parsed.widget || sources.length === 0));
+    const usage = intentUsage
+      ? addUsage(intentUsage, readUsage(response))
+      : readUsage(response);
+    const sources = collectSources(response);
 
-    if (needsResearchRetry) {
-      response = await searchForWidget(client, resolvedQuery, true);
-      parsed = response.output_parsed;
-      if (!parsed) {
-        throw new Error("Structured retry response was empty");
-      }
-      sources = collectSources(response);
-    }
-
-    if (parsed.status !== "success" || !parsed.widget) {
-      const result: GenerateWidgetResult = {
-        status: parsed.status === "success" ? "cannot_answer" : parsed.status,
-        message:
-          parsed.status === "success"
+    if (parsed.status !== "success" || !parsed.widget || sources.length === 0) {
+      const message =
+        parsed.status === "success" && sources.length === 0
+          ? "找到了数据，但没有可验证的来源链接，因此没有创建组件。"
+          : parsed.status === "success"
             ? "搜索完成，但没有得到可渲染的数据。"
-            : parsed.message,
+            : parsed.message;
+      const result: GenerateWidgetResult = {
+        status: parsed.status === "needs_clarification" ? "needs_clarification" : "cannot_answer",
+        message: message.trim().slice(0, 500),
         widget: null,
+        conversationContext: resolvedQuery,
+        usage,
       };
       return Response.json(generateWidgetResultSchema.parse(result));
-    }
-
-    if (sources.length === 0) {
-      return Response.json(
-        { error: "搜索返回了数据，但没有可验证的来源链接，因此没有创建组件。" },
-        { status: 422 },
-      );
     }
 
     const widget = widgetSpecSchema.parse({
@@ -249,8 +332,10 @@ export async function POST(request: Request) {
     return Response.json(
       generateWidgetResultSchema.parse({
         status: "success",
-        message: parsed.message,
+        message: parsed.message.trim().slice(0, 500),
         widget,
+        conversationContext: resolvedQuery,
+        usage,
       }),
     );
   } catch (error) {

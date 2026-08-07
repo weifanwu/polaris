@@ -2,11 +2,17 @@ import type { WidgetSpec } from "@/types";
 
 export function toChartData(widget: WidgetSpec) {
   return widget.rows.map((row) => {
-    const point: Record<string, string | number> = {};
+    const point: Record<string, string | number | null> = {};
     widget.columns.forEach((column, index) => {
       const value = row.cells[index] ?? "";
-      point[column.key] =
-        column.dataType === "number" ? Number(value.replace(/,/g, "")) : value;
+      if (column.dataType !== "number") {
+        point[column.key] = value;
+        return;
+      }
+
+      const normalized = value.replace(/,/g, "").trim();
+      const numeric = normalized ? Number(normalized) : Number.NaN;
+      point[column.key] = Number.isFinite(numeric) ? numeric : null;
     });
     return point;
   });

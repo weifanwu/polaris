@@ -1,6 +1,6 @@
-import type { WidgetSpec } from "@/lib/widget-schema";
+import type { RequestUsage, WidgetSpec } from "@/lib/widget-schema";
 
-export type { WidgetSpec };
+export type { RequestUsage, WidgetSpec };
 
 export type DashboardWidget = WidgetSpec & {
   isDemo?: boolean;
@@ -12,6 +12,7 @@ export type ChatMessage = {
   content: string;
   widgetId?: string;
   tone?: "normal" | "error";
+  usage?: RequestUsage;
 };
 
 export type ApiHealth = {

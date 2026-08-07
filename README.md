@@ -53,8 +53,10 @@ Polaris 会先理解需求和多轮澄清信息，再通过 OpenAI Responses API
 
 - 使用 OpenAI Responses API 与托管 Web Search 检索公开网页。
 - 支持模型主动搜索、打开数据页面并返回可点击来源。
-- 搜索证据不完整时自动进行一次更深入的补充检索。
+- 根据查询复杂度分配 3 或 6 次搜索预算，不再自动执行一次完整的高成本重试。
+- 普通查询使用低成本模型；长时间序列和多来源比较才进入高能力研究路径。
 - 无法验证数据时明确拒绝生成，而不是填补或猜测缺失值。
+- 默认允许输出可核验的部分数据，并明确标出实际覆盖范围与缺口。
 
 ### 多轮澄清与会话记忆
 
@@ -62,7 +64,8 @@ Polaris 会先理解需求和多轮澄清信息，再通过 OpenAI Responses API
 - 自动合并最近对话中的地区、指标、周期、环比/同比和图表类型。
 - 只追问仍会实质影响数据集的关键条件。
 - 用户表示“其他都可以”时选择合理默认值，并在组件中说明。
-- 最近 12 条消息会作为上下文发送；最近 20 条消息保存在当前浏览器。
+- Agent 将已确认条件压缩成最多 500 字符的结构化会话状态；仅在旧会话迁移时发送最近 4 条短消息。
+- 最近 20 条消息仍保存在当前浏览器用于界面展示，但不会在每次请求中重复发送。
 - 成功生成后会保存一条完整、可独立重放的问题，确保 Refresh 不依赖聊天历史。
 
 ### 结构化数据与可视化
@@ -80,6 +83,7 @@ Polaris 会先理解需求和多轮澄清信息，再通过 OpenAI Responses API
 - 全屏专注查看，支持 `Esc` 退出。
 - 删除、刷新或清空 Dashboard。
 - Refresh 失败时保留旧数据，不用失败响应覆盖已有结果。
+- 同一组件更新后 5 分钟内禁止重复 Refresh，避免无意义的重复费用。
 - Dashboard、布局和聊天记录自动保存到 `localStorage`。
 
 ### Chat Panel
@@ -92,10 +96,10 @@ Polaris 会先理解需求和多轮澄清信息，再通过 OpenAI Responses API
 
 ```mermaid
 flowchart LR
-    U["用户问题与历史对话"] --> I["Intent Resolver"]
+    U["用户问题与紧凑会话状态"] --> I["Luna Intent Resolver"]
     I -->|"仍有关键歧义"| Q["Follow-up Question"]
     I -->|"需求完整"| R["Resolved Query"]
-    R --> O["OpenAI Responses API"]
+    R --> O["Terra / Sol Model Router"]
     O --> W["Hosted Web Search"]
     W --> S["Structured Outputs"]
     S --> Z["Zod Validation"]
@@ -112,13 +116,13 @@ flowchart LR
 
 完整请求链路：
 
-1. 浏览器向 `POST /api/generate-widget` 发送当前问题和最近对话。
-2. Intent Resolver 合并多轮约束；条件不足时只返回一个澄清问题。
-3. 完整需求进入 Responses API，并强制调用 `web_search`。
+1. 浏览器向 `POST /api/generate-widget` 发送当前问题和最多 500 字符的紧凑会话状态；旧会话没有状态时才附带 4 条短历史。
+2. 低成本 Intent Resolver 合并多轮约束，更新紧凑状态；条件不足时只返回一个澄清问题。
+3. 简单需求交给 Terra，复杂多来源需求交给 Sol，并按固定预算调用 `web_search`。
 4. 模型按照 `WidgetSpec` Schema 返回标题、列、行、图表类型和摘要。
-5. 服务端提取 Web Search 来源并执行 Zod 校验。
+5. 服务端提取 Web Search 来源并执行 Zod 校验；缺失数值保留为空值，在图中显示为断点而不是 `0`。
 6. 前端根据 `visualization` 字段选择 Recharts 图表、表格或指标卡。
-7. Widget 和响应式布局保存在当前浏览器。
+7. Widget、响应式布局、紧凑会话状态和每次请求的 Token 用量保存在当前浏览器。
 
 ## 技术栈
 
@@ -156,6 +160,8 @@ cp .env.example .env.local
 ```dotenv
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.6
+OPENAI_FAST_MODEL=gpt-5.6-terra
+OPENAI_INTENT_MODEL=gpt-5.6-luna
 ```
 
 启动开发服务器：
@@ -173,7 +179,9 @@ npm run dev
 | 变量 | 必需 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `OPENAI_API_KEY` | 是 | — | 仅由服务端 API Route 读取的 OpenAI API Key |
-| `OPENAI_MODEL` | 否 | `gpt-5.6` | 用于意图解析、Web Search 和 Structured Outputs 的模型 |
+| `OPENAI_MODEL` | 否 | `gpt-5.6` | 复杂、多来源研究使用的高能力模型 |
+| `OPENAI_FAST_MODEL` | 否 | `gpt-5.6-terra` | 普通数据查询使用的低成本模型 |
+| `OPENAI_INTENT_MODEL` | 否 | `gpt-5.6-luna` | 澄清、需求合并和查询分类使用的轻量模型 |
 
 不要提交 `.env.local` 或任何真实密钥。仓库已经通过 `.gitignore` 排除所有 `.env*` 文件，仅保留 `.env.example`。
 
@@ -220,16 +228,9 @@ npm run build
 ```json
 {
   "query": "显示微软最近 7 个交易日的收盘价",
-  "history": [
-    {
-      "role": "user",
-      "content": "使用美元"
-    },
-    {
-      "role": "assistant",
-      "content": "请确认时间范围。"
-    }
-  ]
+  "conversationContext": "微软股票收盘价，最近7个完整交易日，美元",
+  "history": [],
+  "skipClarification": false
 }
 ```
 
@@ -272,6 +273,14 @@ npm run build
       }
     ],
     "generatedAt": "2026-08-07T00:00:00.000Z"
+  },
+  "conversationContext": "微软股票最近7个完整交易日的收盘价，美元，折线图",
+  "usage": {
+    "inputTokens": 3240,
+    "cachedInputTokens": 1100,
+    "outputTokens": 420,
+    "webSearchCalls": 2,
+    "modelCalls": 2
   }
 }
 ```
@@ -306,6 +315,7 @@ polaris/
 │   ├── dashboard-grid.tsx     # 拖拽、缩放与全屏模式
 │   └── widget-card.tsx        # Widget 容器、来源与操作
 ├── lib/
+│   ├── agent-policy.ts        # 上下文边界、研究路由与部分数据策略
 │   ├── openai.ts              # 服务端 OpenAI Client
 │   ├── storage.ts             # 浏览器持久化
 │   └── widget-schema.ts       # Zod Schema 与输出契约
@@ -336,6 +346,8 @@ polaris/
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `OPENAI_FAST_MODEL`
+- `OPENAI_INTENT_MODEL`
 
 不要把生产密钥写进仓库、构建产物、Git Remote URL 或 `.openai/hosting.json`。
 
@@ -352,7 +364,7 @@ Polaris 当前仍是 POC，以下能力尚未实现：
 - 用户账号与应用内权限系统
 - 多 Dashboard、分享和协作
 - 定时刷新、通知和后台任务
-- 查询缓存、成本预算和完整可观测性
+- 跨设备查询缓存、金额预算和完整可观测性
 - 面向大规模数据集的分页或文件导出
 
 此外，Web Search 具有非确定性。网页不可访问、来源缺少完整历史数据或问题跨度过大时，查询可能变慢或返回 `cannot_answer`。
@@ -362,7 +374,7 @@ Polaris 当前仍是 POC，以下能力尚未实现：
 候选方向按优先级包括：
 
 1. 为股票、利率和房地产数据增加结构化数据 Connector。
-2. 增加查询缓存、超时控制、使用量与成本监控。
+2. 在现有 Token 用量显示和搜索预算基础上，增加跨会话缓存与金额级成本上限。
 3. 增加服务端 Dashboard、跨设备同步和身份认证。
 4. 支持定时刷新、提醒和异常变化通知。
 5. 支持多个 Dashboard、分享链接和协作权限。
