@@ -23,6 +23,18 @@ export const sourceSchema = z.object({
   url: z.string().url().max(2_000),
 });
 
+export const dataQualitySchema = z.object({
+  method: z.enum(["official_connector", "web_search"]),
+  sourceName: z.string().min(1).max(120),
+  requestedPoints: z.number().int().nonnegative(),
+  availablePoints: z.number().int().nonnegative(),
+  missingPoints: z.number().int().nonnegative(),
+  coverageStart: z.string().max(40).nullable(),
+  coverageEnd: z.string().max(40).nullable(),
+  frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "annual", "mixed", "unknown"]),
+  verifiedAt: z.string().datetime(),
+});
+
 export const widgetSpecSchema = z
   .object({
     id: z.string().min(1).max(120),
@@ -30,11 +42,12 @@ export const widgetSpecSchema = z
     subtitle: z.string().max(220),
     visualization: visualizationSchema,
     columns: z.array(columnSchema).min(1).max(6),
-    rows: z.array(rowSchema).min(1).max(30),
+    rows: z.array(rowSchema).min(1).max(120),
     summary: z.string().max(500),
     originalQuery: z.string().min(1).max(500),
     sources: z.array(sourceSchema).max(5),
     generatedAt: z.string().datetime(),
+    dataQuality: dataQualitySchema.optional(),
   })
   .superRefine((widget, ctx) => {
     widget.rows.forEach((row, index) => {
@@ -70,7 +83,7 @@ export const generateWidgetResultSchema = z.object({
       cachedInputTokens: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(),
       webSearchCalls: z.number().int().nonnegative(),
-      modelCalls: z.number().int().positive(),
+      modelCalls: z.number().int().nonnegative(),
     })
     .optional(),
 });

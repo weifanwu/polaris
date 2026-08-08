@@ -208,11 +208,15 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .widget-heading > div { min-width: 0; }
 .widget-title-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .widget-title-row h3 { margin: 0; overflow: hidden; color: #eef4f6; font-size: 13px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.quality-pill { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border: 1px solid rgba(113, 156, 165, .28); border-radius: 999px; color: #83aeb7; background: rgba(45, 73, 80, .22); font-size: 7px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
+.quality-pill.official { color: #7ee9c4; border-color: rgba(70, 214, 166, .32); background: rgba(18, 91, 70, .22); }
 .widget-heading p { margin: 5px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .demo-pill { flex: 0 0 auto; padding: 3px 6px; color: var(--amber); border: 1px solid rgba(245, 158, 11, .28); border-radius: 10px; background: rgba(245, 158, 11, .07); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .widget-actions { display: flex; flex: 0 0 auto; }
 .widget-content { flex: 1; min-height: 0; padding: 10px 13px 8px; }
 .chart-area { width: 100%; height: 100%; min-height: 130px; }
+.chart-loading { display: grid; place-items: center; color: var(--dim); font-family: var(--font-geist-mono), monospace; font-size: 9px; letter-spacing: .04em; }
+.echarts-canvas canvas { outline: none; }
 .recharts-tooltip-label, .recharts-tooltip-item { font-size: 11px !important; }
 .table-wrap { width: 100%; height: 100%; overflow: auto; border: 1px solid #1d2830; border-radius: 8px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -238,6 +242,8 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .resize-cue { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: #60727d; font-size: 8px; letter-spacing: .04em; }
 .widget-card:hover .resize-cue { color: #8ea5af; }
 .widget-footer time { flex: 0 0 auto; color: var(--dim); font-family: var(--font-geist-mono), monospace; font-size: 8px; }
+.coverage-stat { flex: 0 0 auto; color: #d7a84e; font-family: var(--font-geist-mono), monospace; font-size: 8px; white-space: nowrap; }
+.coverage-stat.complete { color: #5fc7a3; }
 .widget-error { position: absolute; left: 10px; right: 10px; bottom: 43px; padding: 7px 9px; color: #fecdd3; border: 1px solid rgba(251, 113, 133, .35); border-radius: 7px; background: rgba(61, 17, 27, .94); font-size: 9px; }
 
 .widget-focus-open { overflow: hidden; }

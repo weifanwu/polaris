@@ -12,7 +12,7 @@ export function getOpenAIClient() {
 }
 
 export function getOpenAIModel() {
-  return process.env.OPENAI_MODEL?.trim() || "gpt-5.6";
+  return process.env.OPENAI_MODEL?.trim() || "gpt-5.6-sol";
 }
 
 export function getOpenAIIntentModel() {

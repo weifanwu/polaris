@@ -23,7 +23,7 @@
   <img src="./public/og.png" alt="Polaris live data dashboard" width="100%" />
 </p>
 
-Polaris turns a data question into a reusable dashboard widget. It resolves follow-up answers, searches current public sources, validates the resulting dataset, and renders it as a chart, table, or metric card. Every generated widget keeps its source links and can be refreshed independently.
+Polaris turns a data question into a reusable dashboard widget. It resolves follow-up answers, routes supported requests to official structured datasets, falls back to bounded web research, validates the resulting observations, and compiles them into an interactive chart, table, or metric card. Every generated widget keeps its source links, coverage metadata, and independent refresh state.
 
 The repository is publicly available for personal, educational, research, and other noncommercial use under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
 
@@ -32,6 +32,7 @@ The repository is publicly available for personal, educational, research, and ot
 - [Why Polaris](#why-polaris)
 - [Features](#features)
 - [How it works](#how-it-works)
+- [Data connectors](#data-connectors)
 - [Cost-aware model routing](#cost-aware-model-routing)
 - [Data integrity](#data-integrity)
 - [Technology](#technology)
@@ -69,6 +70,15 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Supports derived calculations such as month-over-month change when the underlying values are verifiable.
 - Stops within an explicit search budget instead of retrying indefinitely.
 
+### Deterministic data pipeline
+
+- Routes supported requests to official APIs and downloadable workbooks before using Web Search.
+- Parses source XLSX/ZIP files in the application runtime instead of asking the model to copy values from search snippets.
+- Performs date alignment, missing-value handling, month-over-month calculations, and coverage checks in deterministic code.
+- Includes first-party connectors for the World Bank Pink Sheet and Bank of Canada Valet API.
+- Falls back cleanly to the bounded research agent when no connector matches.
+- Allows direct connector requests to complete with zero model calls and zero Web Search calls.
+
 ### Multi-turn clarification and memory
 
 - Asks one focused follow-up only when a missing choice materially changes the dataset.
@@ -82,8 +92,10 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Supports `line_chart`, `bar_chart`, `table`, and `metric` widgets.
 - Constrains model output with Structured Outputs and a fixed JSON Schema.
 - Validates columns, rows, types, sources, and chart requirements with Zod.
-- Supports up to six columns, 30 rows, and five clickable sources per widget.
+- Supports up to six columns, 120 rows, and five clickable sources per widget.
 - Renders unavailable numeric values as chart gaps rather than silently converting them to zero.
+- Uses Apache ECharts for zooming, crosshair tooltips, series isolation, min/max markers, average reference lines, responsive resizing, and accessible chart descriptions.
+- Shows whether a widget came from an official connector or Web Search, plus its verified coverage percentage.
 
 ### Flexible dashboard
 
@@ -110,16 +122,22 @@ This makes prompt growth, cache behavior, and expensive research paths visible d
 
 ```mermaid
 flowchart LR
-    U["Question + compact state"] --> I["Luna intent resolver"]
+    U["Question + compact state"] --> C{"Official connector match?"}
+    C -->|"direct match"| F["Fetch API / XLSX"]
+    C -->|"needs context"| I["Luna intent resolver"]
     I -->|"missing required choice"| Q["Focused follow-up"]
-    I -->|"request is complete"| R{"Research router"}
+    I -->|"request is complete"| C2{"Official connector match?"}
+    C2 -->|"yes"| F
+    C2 -->|"no"| R{"Research router"}
     R -->|"simple lookup"| T["Terra"]
     R -->|"complex research"| S["Sol"]
     T --> W["Hosted Web Search"]
     S --> W
+    F --> P["Deterministic parse / align / calculate"]
     W --> O["Structured Outputs"]
-    O --> Z["Zod validation"]
-    Z --> V{"Widget type"}
+    O --> P
+    P --> Z["Quality checks + Zod validation"]
+    Z --> V["ECharts compiler"]
     V --> L["Line chart"]
     V --> B["Bar chart"]
     V --> A["Table"]
@@ -133,11 +151,22 @@ flowchart LR
 The request lifecycle is deliberately bounded:
 
 1. The client sends the current question and a compact conversation state.
-2. A lightweight intent model resolves follow-up answers into one standalone query.
-3. Simple lookups use the fast research model; multi-source and long time-series requests use the advanced model.
-4. The selected model searches within a fixed tool-call budget and returns a structured result.
-5. The server attaches retrieved source URLs and validates the complete widget contract.
-6. The browser renders and stores the widget locally.
+2. Polaris first attempts a deterministic route to a supported official dataset. A complete direct request does not require a model call.
+3. When conversation context is required, a lightweight intent model resolves the follow-up into one standalone query and retries connector routing.
+4. Unmatched requests use the fast or advanced research model with a fixed Web Search budget.
+5. Deterministic code parses, aligns, calculates, and validates observations; missing values remain missing.
+6. The chart compiler adds interaction and quality metadata, then the browser stores the widget locally.
+
+The detailed design and connector contract are documented in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+
+## Data connectors
+
+| Connector | Coverage | Transport | Processing |
+| --- | --- | --- | --- |
+| World Bank Pink Sheet | Gold, silver, energy, metals, and major agricultural commodities | Official monthly XLSX | Sheet discovery, unit extraction, rolling period selection, MoM/YoY calculation |
+| Bank of Canada Valet | Policy rate, prime rate, selected mortgage rates, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
+
+Connectors are tried in a fixed registry and must return the same validated `WidgetSpec` as the research route. This keeps rendering independent from how data was acquired and makes additional sources straightforward to add without expanding the model prompt.
 
 ## Cost-aware model routing
 
@@ -145,9 +174,10 @@ Polaris assigns each stage to the least expensive model tier that fits its job:
 
 | Stage | Default model | Reasoning | Search budget |
 | --- | --- | --- | --- |
+| Supported official dataset | None | Deterministic code | No search |
 | Clarification and context compression | `gpt-5.6-luna` | None | No search |
 | Direct and short data lookups | `gpt-5.6-terra` | Low | Up to 3 calls |
-| Multi-source comparisons and long series | `gpt-5.6` | Low | Up to 6 calls |
+| Multi-source comparisons and long series | `gpt-5.6-sol` | Low | Up to 6 calls |
 
 Additional safeguards include:
 
@@ -157,6 +187,8 @@ Additional safeguards include:
 - at most four short fallback messages during migration from older local state;
 - lower Web Search context for direct lookups; and
 - a refresh cooldown for recently generated widgets.
+- official-connector routing before any research call; and
+- parsed dataset caching for frequently refreshed official workbooks.
 
 Model names and budgets are configurable without changing application code.
 
@@ -170,6 +202,8 @@ Polaris follows a strict evidence contract:
 - Partial datasets are allowed by default and must disclose their actual coverage.
 - Comparison charts may contain gaps when one series is unavailable for a given date.
 - A widget is rejected when it has no trustworthy source or cannot be rendered honestly.
+- Each generated widget records acquisition method, requested and available observations, missing observations, actual coverage, frequency, and verification time.
+- A source connector is not added when its publisher's terms do not permit the intended charting or redistribution workflow.
 
 Web Search is inherently nondeterministic, and third-party pages can change or become unavailable. Verify financial, medical, legal, and other high-stakes information against the linked original source.
 
@@ -181,7 +215,8 @@ Web Search is inherently nondeterministic, and third-party pages can change or b
 | Application runtime | Vinext, Vite, React Server Components |
 | AI | OpenAI Node SDK, Responses API, Web Search, Structured Outputs |
 | Validation | Zod 4 |
-| Charts | Recharts 3 |
+| Charts | Apache ECharts 6 |
+| Structured files | fflate XLSX/ZIP extraction |
 | Dashboard layout | React Grid Layout 2 |
 | Icons | Lucide React |
 | Persistence | Browser `localStorage` |
@@ -193,7 +228,7 @@ Web Search is inherently nondeterministic, and third-party pages can change or b
 
 - Node.js 22.13.0 or newer
 - npm
-- An OpenAI API key
+- An OpenAI API key for Web Search and model-assisted requests
 
 ### Installation
 
@@ -208,7 +243,7 @@ Add your API key to `.env.local`:
 
 ```dotenv
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-5.6
+OPENAI_MODEL=gpt-5.6-sol
 OPENAI_FAST_MODEL=gpt-5.6-terra
 OPENAI_INTENT_MODEL=gpt-5.6-luna
 ```
@@ -221,14 +256,14 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Without an API key, live research is disabled, but the built-in demo remains available for testing the dashboard, visualizations, layout, resize, and focus interactions.
+Without an API key, supported official connectors and the built-in demo still work. Model-assisted clarification and Web Search require a key.
 
 ## Configuration
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `OPENAI_API_KEY` | Yes | — | Server-side OpenAI API credential |
-| `OPENAI_MODEL` | No | `gpt-5.6` | Advanced model for complex, multi-source research |
+| `OPENAI_MODEL` | No | `gpt-5.6-sol` | Advanced model for complex, multi-source research |
 | `OPENAI_FAST_MODEL` | No | `gpt-5.6-terra` | Lower-cost model for direct data lookups |
 | `OPENAI_INTENT_MODEL` | No | `gpt-5.6-luna` | Lightweight model for clarification and context resolution |
 
@@ -245,6 +280,7 @@ Never commit `.env.local` or a real API key. The repository excludes `.env*` fil
 | `npm run typecheck` | Run the TypeScript compiler without emitting files |
 | `npm run test` | Run schema and agent-policy tests |
 | `npm run test:schema` | Run the test file directly |
+| `npm run test:connectors` | Run live integration tests against official datasets |
 
 Before submitting a change:
 
@@ -264,7 +300,7 @@ Reports whether the server has an API key and identifies the primary research mo
 ```json
 {
   "status": "connected",
-  "model": "gpt-5.6"
+  "model": "gpt-5.6-sol"
 }
 ```
 
@@ -329,6 +365,17 @@ Successful response:
         "url": "https://www.bls.gov/"
       }
     ],
+    "dataQuality": {
+      "method": "web_search",
+      "sourceName": "Statistics Canada",
+      "requestedPoints": 24,
+      "availablePoints": 24,
+      "missingPoints": 0,
+      "coverageStart": "2025-07",
+      "coverageEnd": "2026-06",
+      "frequency": "monthly",
+      "verifiedAt": "2026-08-07T00:00:00.000Z"
+    },
     "generatedAt": "2026-08-07T00:00:00.000Z"
   },
   "conversationContext": "Monthly CPI year-over-year comparison; Canada and United States; official sources; line chart",
@@ -374,13 +421,17 @@ polaris/
 │   └── widget-card.tsx        # Widget frame, sources, and actions
 ├── lib/
 │   ├── agent-policy.ts        # Context limits and research routing policy
+│   ├── data-connectors/       # Official APIs, XLSX parser, transforms, and registry
 │   ├── openai.ts              # Server-side OpenAI client and model roles
 │   ├── storage.ts             # Browser persistence
 │   └── widget-schema.ts       # Zod schemas and API contracts
 ├── public/
 │   └── og.png                 # Social preview image
 ├── scripts/
-│   └── test-schema.ts         # Schema and agent-policy tests
+│   ├── test-schema.ts         # Schema, parser, and agent-policy tests
+│   └── test-connectors.ts     # Live official-source integration tests
+├── docs/
+│   └── ARCHITECTURE.md        # Data-agent and connector architecture
 ├── types/                     # Shared frontend types
 ├── worker/                    # Cloudflare Worker entry point
 └── .openai/hosting.json       # OpenAI Sites project configuration

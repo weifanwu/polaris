@@ -7,6 +7,8 @@ import {
   Minimize2,
   MoveDiagonal2,
   RefreshCw,
+  SearchCheck,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import type { DashboardWidget } from "@/types";
@@ -47,6 +49,11 @@ export function WidgetCard({
   onRefresh,
   onToggleFocus,
 }: Props) {
+  const quality = widget.dataQuality;
+  const coverage = quality && quality.requestedPoints > 0
+    ? Math.round((quality.availablePoints / quality.requestedPoints) * 100)
+    : null;
+
   return (
     <article
       className={`widget-card ${focused ? "focused" : ""}`}
@@ -59,6 +66,15 @@ export function WidgetCard({
             <div className="widget-title-row">
               <h3>{widget.title}</h3>
               {widget.isDemo ? <span className="demo-pill">Demo data</span> : null}
+              {quality ? (
+                <span
+                  className={`quality-pill ${quality.method === "official_connector" ? "official" : "searched"}`}
+                  title={`${quality.sourceName} · ${quality.availablePoints}/${quality.requestedPoints} verified observations`}
+                >
+                  {quality.method === "official_connector" ? <ShieldCheck size={10} /> : <SearchCheck size={10} />}
+                  {quality.method === "official_connector" ? "Official" : "Web verified"}
+                </span>
+              ) : null}
             </div>
             <p>{widget.subtitle}</p>
           </div>
@@ -111,6 +127,14 @@ export function WidgetCard({
         {!focused ? (
           <span className="resize-cue" title="Drag any edge or corner to resize">
             <MoveDiagonal2 size={11} /> Resize
+          </span>
+        ) : null}
+        {quality && coverage !== null ? (
+          <span
+            className={`coverage-stat ${coverage === 100 ? "complete" : "partial"}`}
+            title={`${quality.availablePoints} available · ${quality.missingPoints} missing · ${quality.coverageStart ?? "—"} to ${quality.coverageEnd ?? "—"}`}
+          >
+            {coverage}% coverage
           </span>
         ) : null}
         <time dateTime={widget.generatedAt}>

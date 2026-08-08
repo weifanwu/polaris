@@ -14,6 +14,7 @@ import {
   getOpenAIIntentModel,
   getOpenAIModel,
 } from "@/lib/openai";
+import { resolveWithOfficialConnector } from "@/lib/data-connectors";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -129,6 +130,62 @@ function addUsage(...items: RequestUsage[]): RequestUsage {
   );
 }
 
+const ZERO_USAGE: RequestUsage = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  webSearchCalls: 0,
+  modelCalls: 0,
+};
+
+function inferFrequency(query: string) {
+  if (/(逐日|每天|每日|交易日|daily|trading days?)/i.test(query)) return "daily" as const;
+  if (/(每周|逐周|weekly)/i.test(query)) return "weekly" as const;
+  if (/(每月|逐月|环比|同比|monthly|month.over.month|year.over.year)/i.test(query)) return "monthly" as const;
+  if (/(每季|季度|quarterly)/i.test(query)) return "quarterly" as const;
+  if (/(每年|年度|annual|yearly)/i.test(query)) return "annual" as const;
+  return "unknown" as const;
+}
+
+function buildWebDataQuality(widget: NonNullable<GenerateWidgetResult["widget"]>, query: string) {
+  const numericIndices = widget.columns.flatMap((column, index) => column.dataType === "number" ? [index] : []);
+  const numericCells = widget.rows.flatMap((row) => numericIndices.map((index) => row.cells[index]?.trim() ?? ""));
+  const availablePoints = numericCells.filter(Boolean).length;
+  const requestedPoints = numericCells.length;
+  return {
+    method: "web_search" as const,
+    sourceName: widget.sources[0]?.title || "Web Search",
+    requestedPoints,
+    availablePoints,
+    missingPoints: requestedPoints - availablePoints,
+    coverageStart: widget.rows[0]?.cells[0] || null,
+    coverageEnd: widget.rows.at(-1)?.cells[0] || null,
+    frequency: inferFrequency(query),
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
+function connectorResponse(
+  connectorResult: Awaited<ReturnType<typeof resolveWithOfficialConnector>>,
+  query: string,
+  usage: RequestUsage,
+) {
+  if (!connectorResult) return null;
+  const widget = widgetSpecSchema.parse({
+    ...connectorResult.widget,
+    id: crypto.randomUUID(),
+    originalQuery: query,
+    generatedAt: new Date().toISOString(),
+  });
+  return Response.json(generateWidgetResultSchema.parse({
+    status: "success",
+    message: connectorResult.message,
+    widget,
+    conversationContext: query,
+    usage,
+  }));
+}
+
 function friendlyError(error: unknown) {
   if (error instanceof OpenAI.AuthenticationError) {
     return [401, "OpenAI API key 无效，请检查 OPENAI_API_KEY。"] as const;
@@ -217,13 +274,6 @@ async function resolveIntent(
 }
 
 export async function POST(request: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return Response.json(
-      { error: "缺少 OPENAI_API_KEY。你仍然可以使用 Load demo 预览界面。" },
-      { status: 503 },
-    );
-  }
-
   let query = "";
   let conversationContext = "";
   let history: ConversationTurn[] = [];
@@ -251,6 +301,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    if ((!conversationContext && history.length === 0) || skipClarification) {
+      const directResult = await resolveWithOfficialConnector(query);
+      const directResponse = connectorResponse(directResult, query, ZERO_USAGE);
+      if (directResponse) return directResponse;
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。" },
+        { status: 503 },
+      );
+    }
+
     const client = getOpenAIClient();
     let resolvedQuery = query;
     let researchMode = inferResearchMode(query);
@@ -287,6 +350,14 @@ export async function POST(request: Request) {
       researchMode = intent.researchMode;
       allowPartialData = intent.allowPartialData;
     }
+
+    const connectorResult = await resolveWithOfficialConnector(resolvedQuery);
+    const resolvedConnectorResponse = connectorResponse(
+      connectorResult,
+      resolvedQuery,
+      intentUsage ?? ZERO_USAGE,
+    );
+    if (resolvedConnectorResponse) return resolvedConnectorResponse;
 
     const response = await searchForWidget(
       client,
@@ -328,12 +399,16 @@ export async function POST(request: Request) {
       sources,
       generatedAt: new Date().toISOString(),
     });
+    const widgetWithQuality = widgetSpecSchema.parse({
+      ...widget,
+      dataQuality: buildWebDataQuality(widget, resolvedQuery),
+    });
 
     return Response.json(
       generateWidgetResultSchema.parse({
         status: "success",
         message: parsed.message.trim().slice(0, 500),
-        widget,
+        widget: widgetWithQuality,
         conversationContext: resolvedQuery,
         usage,
       }),

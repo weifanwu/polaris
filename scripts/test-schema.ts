@@ -6,7 +6,10 @@ import {
   parseConversationHistory,
 } from "../lib/agent-policy";
 import { toChartData } from "../components/widgets/chart-data";
+import { requestedCalculation, requestedMonthlyPeriods } from "../lib/data-connectors/query-utils";
+import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
+import { strToU8, zipSync } from "fflate";
 
 const valid = {
   id: "test-widget",
@@ -22,6 +25,17 @@ const valid = {
   originalQuery: "test",
   sources: [{ title: "Example", url: "https://example.com" }],
   generatedAt: "2026-08-06T12:00:00.000Z",
+  dataQuality: {
+    method: "official_connector",
+    sourceName: "Example API",
+    requestedPoints: 1,
+    availablePoints: 1,
+    missingPoints: 0,
+    coverageStart: "2026-08-06",
+    coverageEnd: "2026-08-06",
+    frequency: "daily",
+    verifiedAt: "2026-08-06T12:00:00.000Z",
+  },
 } as const;
 
 assert.equal(widgetSpecSchema.safeParse(valid).success, true, "valid widget should pass");
@@ -44,10 +58,19 @@ assert.equal(
 assert.equal(
   widgetSpecSchema.safeParse({
     ...valid,
-    rows: Array.from({ length: 31 }, () => ({ cells: ["2026-08-06", "42"] })),
+    rows: Array.from({ length: 121 }, () => ({ cells: ["2026-08-06", "42"] })),
   }).success,
   false,
-  "more than 30 rows should fail",
+  "more than 120 rows should fail",
+);
+
+assert.equal(
+  widgetSpecSchema.safeParse({
+    ...valid,
+    rows: Array.from({ length: 120 }, (_, index) => ({ cells: [`2026-${String(index + 1).padStart(2, "0")}`, "42"] })),
+  }).success,
+  true,
+  "official connectors should support up to 120 rows",
 );
 
 assert.equal(
@@ -127,4 +150,18 @@ const chartWithGap = toChartData(
 assert.equal(chartWithGap[0].ottawa, null, "missing numeric values should render as gaps");
 assert.equal(chartWithGap[0].toronto, 1.2, "verified numeric values should remain numeric");
 
-console.log("Polaris schema and agent-policy tests passed (14 cases).");
+assert.equal(requestedMonthlyPeriods("过去两年的金价"), 24, "Chinese year ranges should become monthly periods");
+assert.equal(requestedMonthlyPeriods("last 18 months of silver"), 18, "English month ranges should be parsed");
+assert.equal(requestedCalculation("黄金每个月环比"), "mom", "month-over-month calculations should be explicit");
+
+const workbook = zipSync({
+  "xl/workbook.xml": strToU8('<?xml version="1.0"?><workbook><sheets><sheet name="Monthly Prices" r:id="rId2"/></sheets></workbook>'),
+  "xl/_rels/workbook.xml.rels": strToU8('<?xml version="1.0"?><Relationships><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>'),
+  "xl/sharedStrings.xml": strToU8('<?xml version="1.0"?><sst><si><t>Gold</t></si><si><t>2026M07</t></si></sst>'),
+  "xl/worksheets/sheet2.xml": strToU8('<?xml version="1.0"?><worksheet><sheetData><row r="5"><c r="BR5" t="s"><v>0</v></c></row><row r="7"><c r="A7" t="s"><v>1</v></c><c r="BR7"><v>2400.5</v></c></row></sheetData></worksheet>'),
+});
+const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly Prices");
+assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
+assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
+
+console.log("Polaris schema, connector, and agent-policy tests passed (21 cases).");
