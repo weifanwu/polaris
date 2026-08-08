@@ -478,6 +478,12 @@ function hasOccupationQualifier(query: string) {
   return /(?:\boccupation\b|\bprofession\b|software developers?|programmers?|职业|工种|软件开发者|程序员)/i.test(query);
 }
 
+function isSoftwareIndustryUnemploymentQuery(query: string) {
+  const unemployment = /(unemployment|失业)/i.test(query);
+  const softwareIndustry = /(?:software (?:industry|sector|publishers?)|information technology (?:industry|sector)|computer (?:industry|sector)|\bit\s*(?:industry|sector|行业)|软件行业|软件产业|软件公司|信息技术行业|计算机行业|科技行业)/i.test(query);
+  return unemployment && softwareIndustry && !hasOccupationQualifier(query);
+}
+
 async function resolveIndustryUnemployment(query: string, industries: IndustryDefinition[]) {
   const selectedRegions = selectGeographies(query, UNEMPLOYMENT_VECTORS);
   if (!selectedRegions.length || selectedRegions.some((region) => region !== "Canada")) return null;
@@ -641,6 +647,39 @@ export const statisticsCanadaConnector: DataConnector = {
           verifiedAt: new Date().toISOString(),
           scope,
         },
+      },
+    };
+  },
+  async tryResolveProxy(query) {
+    if (!isSoftwareIndustryUnemploymentQuery(query)) return null;
+    const proxyIndustries = INDUSTRIES.filter((industry) =>
+      industry.name === "Professional, scientific and technical services [54]"
+      || industry.name === "Information, culture and recreation [51, 71]"
+    );
+    const result = await resolveIndustryUnemployment(query, proxyIndustries);
+    if (!result) return null;
+
+    const chinese = isChineseQuery(query);
+    return {
+      ...result,
+      message: chinese
+        ? "未找到可核验的加拿大 IT 行业独立月度失业率；已改用加拿大统计局两条最接近的 NAICS 宽口径官方序列作为代理，并明确保留口径差异。"
+        : "No verifiable standalone monthly Canadian IT-industry unemployment rate was found. This widget uses two clearly labelled broad NAICS proxy series from Statistics Canada.",
+      widget: {
+        ...result.widget,
+        title: chinese ? "加拿大 IT 行业失业率代理指标" : "Canadian IT-industry unemployment proxies",
+        subtitle: `${result.widget.subtitle} · ${chinese ? "代理口径，并非 IT 行业独立序列" : "Proxy scope, not a standalone IT-industry series"}`,
+        summary: `${chinese
+          ? "代理 1 覆盖专业、科学和技术服务业（含计算机系统设计）；代理 2 覆盖信息、文化和娱乐业（含软件出版，但同时包含大量非 IT 活动）。两条线均不能视为 IT 行业本身的失业率。"
+          : "Proxy 1 covers professional, scientific and technical services, including computer systems design. Proxy 2 covers information, culture and recreation, including software publishing but substantial non-IT activity. Neither series is the IT industry's own unemployment rate."} ${result.widget.summary}`.slice(0, 500),
+        dataQuality: result.widget.dataQuality
+          ? {
+              ...result.widget.dataQuality,
+              scope: (chinese
+                ? "代理口径：NAICS 54 与合并 NAICS 51/71；不等同于加拿大 IT 行业"
+                : "Proxy scope: NAICS 54 and combined NAICS 51/71; not the Canadian IT industry").slice(0, 240),
+            }
+          : undefined,
       },
     };
   },

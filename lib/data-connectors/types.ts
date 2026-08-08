@@ -11,4 +11,5 @@ export type DataConnector = {
   id: string;
   supportsQuery?: (query: string) => boolean;
   tryResolve: (query: string) => Promise<DataConnectorResult | null>;
+  tryResolveProxy?: (query: string) => Promise<DataConnectorResult | null>;
 };

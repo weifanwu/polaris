@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { resolveWithOfficialConnector } from "../lib/data-connectors/index";
+import {
+  resolveWithOfficialConnector,
+  resolveWithOfficialProxy,
+} from "../lib/data-connectors/index";
 
 const gold = await resolveWithOfficialConnector("过去两年的金价，按月画折线图");
 assert.ok(gold, "World Bank commodity connector should answer gold queries");
@@ -20,6 +23,13 @@ assert.equal(unemployment.widget.rows.length, 24);
 
 const incorrectSoftwareFallback = await resolveWithOfficialConnector("加拿大软件行业最近10年月度失业率");
 assert.equal(incorrectSoftwareFallback, null, "software-industry qualifiers must never fall back to Canada's overall unemployment vector");
+
+const softwareProxy = await resolveWithOfficialProxy("加拿大IT行业最近10年月度失业率");
+assert.ok(softwareProxy, "a researched software-industry gap should have an explicit official proxy fallback");
+assert.equal(softwareProxy.widget.rows.length, 120);
+assert.equal(softwareProxy.widget.columns.length, 3, "the proxy should show both relevant broad NAICS series");
+assert.match(softwareProxy.widget.title, /代理指标/);
+assert.match(softwareProxy.widget.dataQuality?.scope ?? "", /不等同于加拿大 IT 行业/);
 
 const industryUnemployment = await resolveWithOfficialConnector("加拿大专业、科学和技术服务业最近10年月度失业率");
 assert.ok(industryUnemployment, "Statistics Canada should answer supported broad-industry unemployment queries");

@@ -14,7 +14,7 @@ flowchart TD
     D -->|"exact match"| E["Official API or downloadable dataset"]
     D -->|"unsupported or unmatched"| F["Mandatory bounded Web Search research"]
     F -->|"exact series unavailable"| P["Search and label credible proxy measures"]
-    P -->|"useful proxy found"| G
+    P -->|"web or official proxy found"| G
     P -->|"no defensible proxy"| Q["Cannot answer with search usage reported"]
     E --> G["Parse and normalize"]
     F -->|"exact series found"| G
@@ -71,7 +71,7 @@ The quality envelope records:
 
 The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. Broad-industry unemployment uses Table 14-10-0022-01 and is explicitly marked as unadjusted and NAICS-based. It requests only the needed vectors and periods, then aligns regions or industries and calculates changes locally.
 
-Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The capability guard therefore blocks the overall Canada vector, then automatically routes the request to Web Search. Research looks for an exact external series first and then for clearly labelled proxies such as broad-industry unemployment, software-industry employment, vacancies, layoffs, or GDP. Only a failed exact-and-proxy search may return `cannot_answer`.
+Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The capability guard therefore blocks the overall Canada vector, then automatically routes the request through a low-context discovery search. If no exact external series exists, Polaris returns two clearly labelled 120-month Statistics Canada proxies—NAICS 54 and combined NAICS 51/71—with the scope mismatch visible in the title, summary, and quality metadata. It never presents either proxy as the IT industry's own unemployment rate.
 
 ### World Bank Indicators
 

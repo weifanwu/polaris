@@ -5,6 +5,7 @@ import {
   inferPartialDataPolicy,
   inferResearchMode,
   isCompleteQualifiedDataRequest,
+  isKnownProxyResearchRequest,
   parseConversationContext,
   parseConversationHistory,
   resolveDeterministicFollowUp,
@@ -17,7 +18,10 @@ import {
   getOpenAIIntentModel,
   getOpenAIModel,
 } from "@/lib/openai";
-import { resolveWithOfficialConnector } from "@/lib/data-connectors";
+import {
+  resolveWithOfficialConnector,
+  resolveWithOfficialProxy,
+} from "@/lib/data-connectors";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -219,7 +223,10 @@ async function searchForWidget(
   allowPartialData: boolean,
 ) {
   const complex = researchMode === "complex";
-  const researchBrief = `Research budget: ${complex ? "complex, at most 6 web searches" : "simple, at most 3 web searches"}.
+  const proxyDiscovery = isKnownProxyResearchRequest(query);
+  const maxToolCalls = proxyDiscovery ? 3 : complex ? 6 : 3;
+  const searchContextSize = proxyDiscovery ? "low" : complex ? "medium" : "low";
+  const researchBrief = `Research budget: ${proxyDiscovery ? "proxy discovery, at most 3 web searches" : complex ? "complex, at most 6 web searches" : "simple, at most 3 web searches"}.
 Partial verified rows: ${allowPartialData ? "allowed and preferred over failure" : "not allowed; the requested range must be complete"}.`;
 
   return client.responses.parse(
@@ -229,11 +236,11 @@ Partial verified rows: ${allowPartialData ? "allowed and preferred over failure"
       tools: [
         {
           type: "web_search",
-          search_context_size: complex ? "medium" : "low",
+          search_context_size: searchContextSize,
         },
       ],
       tool_choice: "required",
-      max_tool_calls: complex ? 6 : 3,
+      max_tool_calls: maxToolCalls,
       max_output_tokens: 6_000,
       prompt_cache_key: complex
         ? "polaris-research-complex-v3"
@@ -407,6 +414,12 @@ export async function POST(request: Request) {
     const sources = collectSources(response);
 
     if (parsed.status !== "success" || !parsed.widget || sources.length === 0) {
+      const proxyResult = parsed.status === "cannot_answer"
+        ? await resolveWithOfficialProxy(resolvedQuery)
+        : null;
+      const proxyResponse = connectorResponse(proxyResult, resolvedQuery, usage);
+      if (proxyResponse) return proxyResponse;
+
       const message =
         parsed.status === "success" && sources.length === 0
           ? "找到了数据，但没有可验证的来源链接，因此没有创建组件。"

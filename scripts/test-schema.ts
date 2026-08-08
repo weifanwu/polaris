@@ -4,6 +4,7 @@ import {
   inferPartialDataPolicy,
   inferResearchMode,
   isCompleteQualifiedDataRequest,
+  isKnownProxyResearchRequest,
   parseConversationContext,
   parseConversationHistory,
   resolveDeterministicFollowUp,
@@ -143,6 +144,11 @@ assert.equal(
   false,
   "ambiguous requests should still use intent resolution",
 );
+assert.equal(
+  isKnownProxyResearchRequest("加拿大IT行业最近10年月度失业率"),
+  true,
+  "known exact-series gaps should use the lower-cost proxy-discovery budget",
+);
 
 assert.equal(
   inferResearchMode("比较多伦多和渥太华最近两年每个月的环比"),
@@ -202,4 +208,4 @@ const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (32 cases).");
+console.log("Polaris schema, connector, and agent-policy tests passed (33 cases).");

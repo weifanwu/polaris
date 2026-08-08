@@ -27,3 +27,16 @@ export async function resolveWithOfficialConnector(query: string): Promise<DataC
   }
   return null;
 }
+
+export async function resolveWithOfficialProxy(query: string): Promise<DataConnectorResult | null> {
+  for (const connector of CONNECTORS) {
+    if (!connector.tryResolveProxy) continue;
+    try {
+      const result = await connector.tryResolveProxy(query);
+      if (result) return result;
+    } catch (error) {
+      console.error(`[Polaris proxy:${connector.id}]`, error);
+    }
+  }
+  return null;
+}

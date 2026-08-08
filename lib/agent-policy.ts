@@ -61,6 +61,13 @@ export function isCompleteQualifiedDataRequest(query: string) {
   return hasMetric && hasExplicitScope && hasPeriod && hasFrequency;
 }
 
+export function isKnownProxyResearchRequest(query: string) {
+  const wantsUnemployment = /(unemployment|失业)/i.test(query);
+  const wantsSoftwareIndustry =
+    /(?:software (?:industry|sector)|information technology (?:industry|sector)|computer (?:industry|sector)|\bit\s*(?:industry|sector|行业)|软件行业|软件产业|信息技术行业|计算机行业|科技行业)/i.test(query);
+  return wantsUnemployment && wantsSoftwareIndustry;
+}
+
 export function inferResearchMode(query: string): ResearchMode {
   const complexPattern =
     /(每月|逐月|环比|同比|历史|最近.{0,8}(?:个月|年)|过去.{0,8}(?:个月|年)|monthly|month.over.month|year.over.year|historical|time.?series|last\s+\d+\s+(?:months|years))/i;
