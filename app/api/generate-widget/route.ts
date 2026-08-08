@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
+import { z } from "zod";
 import {
   buildResearchFallbackInstruction,
   inferPartialDataPolicy,
@@ -67,6 +68,11 @@ Success criteria:
 - Return cannot_answer only when fewer than two useful chart rows can be verified, no trustworthy source exists, or the result cannot be rendered honestly.
 
 Output only the required structured result. Every success must contain a non-empty widget.`;
+
+const exactSeriesDiscoverySchema = z.object({
+  exactSeriesFound: z.boolean(),
+  evidence: z.string().max(300),
+});
 
 type SourceCandidate = { title: string; url: string };
 type ParsedResponse = Awaited<
@@ -261,6 +267,36 @@ Partial verified rows: ${allowPartialData ? "allowed and preferred over failure"
   );
 }
 
+async function discoverExactSeries(
+  client: ReturnType<typeof getOpenAIClient>,
+  query: string,
+) {
+  return client.responses.parse(
+    {
+      model: getOpenAIFastModel(),
+      reasoning: { effort: "none" },
+      tools: [{ type: "web_search", search_context_size: "low" }],
+      tool_choice: "required",
+      max_tool_calls: 1,
+      max_output_tokens: 400,
+      prompt_cache_key: "polaris-exact-series-discovery-v1",
+      include: ["web_search_call.action.sources"],
+      input: [
+        {
+          role: "developer",
+          content: `Perform one focused Web Search. Determine whether a trustworthy source publishes the exact requested time series with actual downloadable or tabulated values. Broad aggregates, related occupations, estimates, and proxies do not count as the exact series. Set exactSeriesFound true only when the exact geography, population/industry scope, frequency, metric, and requested history are available.`,
+        },
+        { role: "user", content: query },
+      ],
+      text: {
+        verbosity: "low",
+        format: zodTextFormat(exactSeriesDiscoverySchema, "polaris_exact_series_discovery"),
+      },
+    },
+    { timeout: 25_000 },
+  );
+}
+
 async function resolveIntent(
   client: ReturnType<typeof getOpenAIClient>,
   query: string,
@@ -397,6 +433,18 @@ export async function POST(request: Request) {
       );
     }
 
+    let accumulatedUsage = intentUsage ?? ZERO_USAGE;
+    let proxyCandidate: Awaited<ReturnType<typeof resolveWithOfficialProxy>> = null;
+    if (isKnownProxyResearchRequest(resolvedQuery)) {
+      proxyCandidate = await resolveWithOfficialProxy(resolvedQuery);
+      const discoveryResponse = await discoverExactSeries(client, resolvedQuery);
+      accumulatedUsage = addUsage(accumulatedUsage, readUsage(discoveryResponse));
+      if (!discoveryResponse.output_parsed?.exactSeriesFound && proxyCandidate) {
+        const proxyResponse = connectorResponse(proxyCandidate, resolvedQuery, accumulatedUsage);
+        if (proxyResponse) return proxyResponse;
+      }
+    }
+
     const response = await searchForWidget(
       client,
       resolvedQuery,
@@ -408,14 +456,12 @@ export async function POST(request: Request) {
       throw new Error("Structured response was empty");
     }
 
-    const usage = intentUsage
-      ? addUsage(intentUsage, readUsage(response))
-      : readUsage(response);
+    const usage = addUsage(accumulatedUsage, readUsage(response));
     const sources = collectSources(response);
 
     if (parsed.status !== "success" || !parsed.widget || sources.length === 0) {
       const proxyResult = parsed.status === "cannot_answer"
-        ? await resolveWithOfficialProxy(resolvedQuery)
+        ? proxyCandidate ?? await resolveWithOfficialProxy(resolvedQuery)
         : null;
       const proxyResponse = connectorResponse(proxyResult, resolvedQuery, usage);
       if (proxyResponse) return proxyResponse;
