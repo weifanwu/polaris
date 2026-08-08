@@ -48,6 +48,19 @@ export function resolveDeterministicFollowUp(query: string, conversationContext:
   return null;
 }
 
+export function isCompleteQualifiedDataRequest(query: string) {
+  const hasMetric =
+    /(?:失业率|就业率|就业人数|工资|时薪|房价|价格|cpi|gdp|unemployment|employment|wages?|prices?|rate)/i.test(query);
+  const hasExplicitScope =
+    /(?:\bindustry\b|\bsector\b|\boccupation\b|\bprofession\b|行业|产业|职业|工种)/i.test(query);
+  const hasPeriod =
+    /(?:最近|过去|近).{0,12}(?:个月|年)|(?:last|past)\s+\d+\s+(?:months?|years?)|\b(?:19|20)\d{2}\b/i.test(query);
+  const hasFrequency =
+    /(?:月度|每月|逐月|季度|每季|逐季|年度|每年|逐年|monthly|quarterly|annual|yearly)/i.test(query);
+
+  return hasMetric && hasExplicitScope && hasPeriod && hasFrequency;
+}
+
 export function inferResearchMode(query: string): ResearchMode {
   const complexPattern =
     /(每月|逐月|环比|同比|历史|最近.{0,8}(?:个月|年)|过去.{0,8}(?:个月|年)|monthly|month.over.month|year.over.year|historical|time.?series|last\s+\d+\s+(?:months|years))/i;

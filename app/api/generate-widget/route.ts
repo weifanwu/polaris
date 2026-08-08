@@ -4,6 +4,7 @@ import {
   buildResearchFallbackInstruction,
   inferPartialDataPolicy,
   inferResearchMode,
+  isCompleteQualifiedDataRequest,
   parseConversationContext,
   parseConversationHistory,
   resolveDeterministicFollowUp,
@@ -320,8 +321,9 @@ export async function POST(request: Request) {
     const deterministicFollowUp = !skipClarification
       ? resolveDeterministicFollowUp(query, conversationContext)
       : null;
+    const completeQualifiedRequest = isCompleteQualifiedDataRequest(query);
 
-    if (!process.env.OPENAI_API_KEY && !deterministicFollowUp) {
+    if (!process.env.OPENAI_API_KEY && !deterministicFollowUp && !completeQualifiedRequest) {
       return Response.json(
         { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。" },
         { status: 503 },
@@ -335,8 +337,8 @@ export async function POST(request: Request) {
     let intentUsage: RequestUsage | null = null;
 
     if (!skipClarification) {
-      if (deterministicFollowUp) {
-        resolvedQuery = deterministicFollowUp;
+      if (deterministicFollowUp || completeQualifiedRequest) {
+        resolvedQuery = deterministicFollowUp ?? query;
         researchMode = inferResearchMode(resolvedQuery);
         allowPartialData = inferPartialDataPolicy(resolvedQuery);
         intentUsage = ZERO_USAGE;

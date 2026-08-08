@@ -3,6 +3,7 @@ import {
   buildResearchFallbackInstruction,
   inferPartialDataPolicy,
   inferResearchMode,
+  isCompleteQualifiedDataRequest,
   parseConversationContext,
   parseConversationHistory,
   resolveDeterministicFollowUp,
@@ -132,6 +133,16 @@ assert.match(
   /latest available observation/,
   "current should confirm the end of a relative rolling range",
 );
+assert.equal(
+  isCompleteQualifiedDataRequest("加拿大IT行业最近10年月度失业率"),
+  true,
+  "an explicit industry, metric, period, and frequency must not trigger another scope question",
+);
+assert.equal(
+  isCompleteQualifiedDataRequest("加拿大IT失业率"),
+  false,
+  "ambiguous requests should still use intent resolution",
+);
 
 assert.equal(
   inferResearchMode("比较多伦多和渥太华最近两年每个月的环比"),
@@ -191,4 +202,4 @@ const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (30 cases).");
+console.log("Polaris schema, connector, and agent-policy tests passed (32 cases).");
