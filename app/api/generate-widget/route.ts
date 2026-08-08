@@ -437,8 +437,12 @@ export async function POST(request: Request) {
     let proxyCandidate: Awaited<ReturnType<typeof resolveWithOfficialProxy>> = null;
     if (isKnownProxyResearchRequest(resolvedQuery)) {
       proxyCandidate = await resolveWithOfficialProxy(resolvedQuery);
-      const discoveryResponse = await discoverExactSeries(client, resolvedQuery);
-      accumulatedUsage = addUsage(accumulatedUsage, readUsage(discoveryResponse));
+      try {
+        const discoveryResponse = await discoverExactSeries(client, resolvedQuery);
+        accumulatedUsage = addUsage(accumulatedUsage, readUsage(discoveryResponse));
+      } catch (error) {
+        if (!proxyCandidate) throw error;
+      }
       if (proxyCandidate) {
         const proxyResponse = connectorResponse(proxyCandidate, resolvedQuery, accumulatedUsage);
         if (proxyResponse) return proxyResponse;
