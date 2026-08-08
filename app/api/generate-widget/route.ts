@@ -439,7 +439,7 @@ export async function POST(request: Request) {
       proxyCandidate = await resolveWithOfficialProxy(resolvedQuery);
       const discoveryResponse = await discoverExactSeries(client, resolvedQuery);
       accumulatedUsage = addUsage(accumulatedUsage, readUsage(discoveryResponse));
-      if (!discoveryResponse.output_parsed?.exactSeriesFound && proxyCandidate) {
+      if (proxyCandidate) {
         const proxyResponse = connectorResponse(proxyCandidate, resolvedQuery, accumulatedUsage);
         if (proxyResponse) return proxyResponse;
       }
