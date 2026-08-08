@@ -5,6 +5,7 @@ import {
   inferResearchMode,
   parseConversationContext,
   parseConversationHistory,
+  resolveDeterministicFollowUp,
   type ConversationTurn,
   type ResearchMode,
 } from "@/lib/agent-policy";
@@ -14,7 +15,10 @@ import {
   getOpenAIIntentModel,
   getOpenAIModel,
 } from "@/lib/openai";
-import { resolveWithOfficialConnector } from "@/lib/data-connectors";
+import {
+  inspectOfficialConnectorBoundary,
+  resolveWithOfficialConnector,
+} from "@/lib/data-connectors";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -30,7 +34,11 @@ const INTENT_PROMPT = `Goal: turn the latest user message plus compact conversat
 
 Success criteria:
 - Preserve supplied metric, geography, comparison groups, period, calculation, source preference, and chart type.
+- Preserve every qualifier, especially industry versus occupation; never silently drop a qualifier to make a connector match.
 - Never ask again for a supplied choice. If the user says remaining choices are flexible, choose a comparable default.
+- Relative periods such as "last 10 years" are complete specifications. Interpret them as trailing calendar periods ending at the latest available observation; never ask for explicit start and end dates.
+- "Current", "up to now", "当前", and short confirmations confirm a rolling range ending at the latest available observation.
+- Once the user has selected industry or occupation, retain that choice and do not ask the same distinction again.
 - Ask one short question only when a missing choice materially changes the dataset.
 - Treat a new unrelated request as a replacement for the prior context.
 - Set researchMode to complex for multi-source comparisons, long monthly histories, derived calculations, or fragmented datasets; otherwise simple.
@@ -50,6 +58,8 @@ Success criteria:
 - You may calculate requested arithmetic from retrieved values. For month-over-month change, require both adjacent verified months and omit the calculation when either month is missing.
 - If partial data is allowed, do not reject a useful chart because some requested dates are unavailable. Include verified rows, preserve gaps, and state the actual coverage and omissions in the subtitle or summary.
 - For comparisons, align matching dates when possible. Rows may contain one verified series and one empty cell when coverage differs.
+- Satisfy every qualifier in the resolved request. Never replace an industry, occupation, geography, demographic group, or frequency with an aggregate merely because aggregate data is easier to find.
+- If the exact qualified series is unavailable, return cannot_answer and name the missing dimension; do not label an aggregate chart as the requested subgroup.
 - Return cannot_answer only when fewer than two useful chart rows can be verified, no trustworthy source exists, or the result cannot be rendered honestly.
 
 Output only the required structured result. Every success must contain a non-empty widget.`;
@@ -186,6 +196,21 @@ function connectorResponse(
   }));
 }
 
+function connectorBoundaryResponse(
+  query: string,
+  usage: RequestUsage,
+) {
+  const boundary = inspectOfficialConnectorBoundary(query);
+  if (!boundary) return null;
+  return Response.json(generateWidgetResultSchema.parse({
+    status: boundary.status,
+    message: boundary.message.trim().slice(0, 500),
+    widget: null,
+    conversationContext: (boundary.conversationContext ?? query).slice(0, 500),
+    usage,
+  }));
+}
+
 function friendlyError(error: unknown) {
   if (error instanceof OpenAI.AuthenticationError) {
     return [401, "OpenAI API key 无效，请检查 OPENAI_API_KEY。"] as const;
@@ -302,54 +327,74 @@ export async function POST(request: Request) {
 
   try {
     if ((!conversationContext && history.length === 0) || skipClarification) {
+      const directBoundaryResponse = connectorBoundaryResponse(query, ZERO_USAGE);
+      if (directBoundaryResponse) return directBoundaryResponse;
       const directResult = await resolveWithOfficialConnector(query);
       const directResponse = connectorResponse(directResult, query, ZERO_USAGE);
       if (directResponse) return directResponse;
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    const deterministicFollowUp = !skipClarification
+      ? resolveDeterministicFollowUp(query, conversationContext)
+      : null;
+
+    if (!process.env.OPENAI_API_KEY && !deterministicFollowUp) {
       return Response.json(
         { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。" },
         { status: 503 },
       );
     }
 
-    const client = getOpenAIClient();
+    const client = process.env.OPENAI_API_KEY ? getOpenAIClient() : null;
     let resolvedQuery = query;
     let researchMode = inferResearchMode(query);
     let allowPartialData = inferPartialDataPolicy(query);
     let intentUsage: RequestUsage | null = null;
 
     if (!skipClarification) {
-      const intentResponse = await resolveIntent(
-        client,
-        query,
-        conversationContext,
-        history,
-      );
-      intentUsage = readUsage(intentResponse);
-      const intent = intentResponse.output_parsed;
-      if (!intent) {
-        throw new Error("Structured intent response was empty");
-      }
-
-      const nextContext = intent.resolvedQuery.trim().slice(0, 500) || query;
-      if (intent.status === "needs_clarification") {
-        return Response.json(
-          generateWidgetResultSchema.parse({
-            status: "needs_clarification",
-            message: intent.message.trim().slice(0, 500),
-            widget: null,
-            conversationContext: nextContext,
-            usage: intentUsage,
-          }),
+      if (deterministicFollowUp) {
+        resolvedQuery = deterministicFollowUp;
+        researchMode = inferResearchMode(resolvedQuery);
+        allowPartialData = inferPartialDataPolicy(resolvedQuery);
+        intentUsage = ZERO_USAGE;
+      } else {
+        if (!client) throw new Error("OpenAI client is unavailable");
+        const intentResponse = await resolveIntent(
+          client,
+          query,
+          conversationContext,
+          history,
         );
-      }
+        intentUsage = readUsage(intentResponse);
+        const intent = intentResponse.output_parsed;
+        if (!intent) {
+          throw new Error("Structured intent response was empty");
+        }
 
-      resolvedQuery = nextContext;
-      researchMode = intent.researchMode;
-      allowPartialData = intent.allowPartialData;
+        const nextContext = intent.resolvedQuery.trim().slice(0, 500) || query;
+        if (intent.status === "needs_clarification") {
+          return Response.json(
+            generateWidgetResultSchema.parse({
+              status: "needs_clarification",
+              message: intent.message.trim().slice(0, 500),
+              widget: null,
+              conversationContext: nextContext,
+              usage: intentUsage,
+            }),
+          );
+        }
+
+        resolvedQuery = nextContext;
+        researchMode = intent.researchMode;
+        allowPartialData = intent.allowPartialData;
+      }
     }
+
+    const resolvedBoundaryResponse = connectorBoundaryResponse(
+      resolvedQuery,
+      intentUsage ?? ZERO_USAGE,
+    );
+    if (resolvedBoundaryResponse) return resolvedBoundaryResponse;
 
     const connectorResult = await resolveWithOfficialConnector(resolvedQuery);
     const resolvedConnectorResponse = connectorResponse(
@@ -358,6 +403,13 @@ export async function POST(request: Request) {
       intentUsage ?? ZERO_USAGE,
     );
     if (resolvedConnectorResponse) return resolvedConnectorResponse;
+
+    if (!client) {
+      return Response.json(
+        { error: "这个限定条件没有匹配到官方连接器，并且缺少用于检索的 OPENAI_API_KEY。" },
+        { status: 503 },
+      );
+    }
 
     const response = await searchForWidget(
       client,

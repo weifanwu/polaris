@@ -76,6 +76,7 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Routes supported requests to official APIs and downloadable workbooks before using Web Search.
 - Parses source XLSX/ZIP files in the application runtime instead of asking the model to copy values from search snippets.
 - Performs date alignment, missing-value handling, month-over-month calculations, and coverage checks in deterministic code.
+- Checks requested dimensions before accepting a connector match; industry, occupation, geography, and frequency qualifiers cannot be silently discarded.
 - Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
 - Falls back cleanly to the bounded research agent when no connector matches.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
@@ -164,7 +165,7 @@ The detailed design and connector contract are documented in [docs/ARCHITECTURE.
 
 | Connector | Coverage | Transport | Processing |
 | --- | --- | --- | --- |
-| Statistics Canada WDS | Canadian CPI, employment, unemployment, labour-force participation, hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade | Official JSON API with stable vectors | Province/CMA selection, monthly or quarterly alignment, unit normalization, MoM/YoY calculation |
+| Statistics Canada WDS | Canadian CPI, employment, overall and broad-industry unemployment, labour-force participation, hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade | Official JSON API with stable vectors | Province/CMA or broad-NAICS selection, monthly or quarterly alignment, unit normalization, MoM/YoY calculation |
 | Bank of Canada Valet | Policy rate, Bank Rate, CORRA, prime and mortgage rates, Government of Canada bond yields, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
 | World Bank Indicators | Cross-country GDP, growth, population, inflation, unemployment, life expectancy, emissions, trade, debt, internet use, and fertility | Official JSON API | Country comparison, annual alignment, missing-observation checks, annual change calculation |
 | World Bank Pink Sheet | Gold, silver, energy, metals, and major agricultural commodities | Official monthly XLSX | Sheet discovery, unit extraction, rolling period selection, MoM/YoY calculation |
@@ -173,6 +174,8 @@ The detailed design and connector contract are documented in [docs/ARCHITECTURE.
 Connectors are tried in a fixed registry and must return the same validated `WidgetSpec` as the research route. This keeps rendering independent from how data was acquired and makes additional sources straightforward to add without expanding the model prompt.
 
 The Canadian catalog uses Statistics Canada vector identifiers, which remain stable across table updates. A connector request sends only the selected vectors and requested number of periods to the publisher; full tables and long data histories are not sent through a language model. Up to five regions or countries can be aligned in one widget, and unsupported mixed-source requests fall through to bounded research instead of returning a misleading partial comparison.
+
+Connector matching is exact with respect to requested dimensions. For example, a request for software-industry unemployment cannot fall back to Canada's overall unemployment rate. Statistics Canada publishes monthly industry unemployment only for broad NAICS groups; Polaris identifies that data gap and suggests an explicitly labelled proxy such as Professional, scientific and technical services [54], rather than generating a falsely specific chart.
 
 ## Cost-aware model routing
 
@@ -203,6 +206,7 @@ Model names and budgets are configurable without changing application code.
 Polaris follows a strict evidence contract:
 
 - Retrieved values are never replaced with remembered, estimated, or interpolated numbers.
+- Requested subgroup dimensions are never replaced with an aggregate series.
 - Arithmetic may be calculated only from retrieved source values.
 - A month-over-month calculation requires both adjacent verified months.
 - Partial datasets are allowed by default and must disclose their actual coverage.

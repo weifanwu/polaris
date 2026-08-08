@@ -77,6 +77,7 @@ export function WidgetCard({
               ) : null}
             </div>
             <p>{widget.subtitle}</p>
+            {quality?.scope ? <small className="widget-scope">{quality.scope}</small> : null}
           </div>
         </div>
         <div className="widget-actions">

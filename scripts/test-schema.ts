@@ -4,6 +4,7 @@ import {
   inferResearchMode,
   parseConversationContext,
   parseConversationHistory,
+  resolveDeterministicFollowUp,
 } from "../lib/agent-policy";
 import { toChartData } from "../components/widgets/chart-data";
 import {
@@ -120,6 +121,16 @@ assert.equal(
   500,
   "conversation context should be capped at 500 characters",
 );
+assert.match(
+  resolveDeterministicFollowUp("软件行业", "加拿大软件失业率；最近10年；按月") ?? "",
+  /software industry/,
+  "a repeated industry selection should be merged without another model question",
+);
+assert.match(
+  resolveDeterministicFollowUp("当前", "加拿大失业率；最近10年；按月") ?? "",
+  /latest available observation/,
+  "current should confirm the end of a relative rolling range",
+);
 
 assert.equal(
   inferResearchMode("比较多伦多和渥太华最近两年每个月的环比"),
@@ -174,4 +185,4 @@ const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (25 cases).");
+console.log("Polaris schema, connector, and agent-policy tests passed (27 cases).");

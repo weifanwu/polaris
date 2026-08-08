@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { hasSubnationalGeography } from "./query-capabilities";
 import {
   isChineseQuery,
   requestedAnnualPeriods,
@@ -91,7 +92,7 @@ function buildSummary(labels: string[], rows: Array<{ year: string; values: Arra
 export const worldBankIndicatorsConnector: DataConnector = {
   id: "world-bank-indicators-api",
   async tryResolve(query) {
-    if (wantsUnsupportedDailyFrequency(query) || requestsMonthlyOrQuarterlyFrequency(query)) return null;
+    if (wantsUnsupportedDailyFrequency(query) || requestsMonthlyOrQuarterlyFrequency(query) || hasSubnationalGeography(query)) return null;
     const indicator = INDICATORS.find((candidate) => candidate.aliases.some((alias) => alias.test(query)));
     if (!indicator) return null;
     const countries = selectCountries(query);

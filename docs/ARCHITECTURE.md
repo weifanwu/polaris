@@ -8,9 +8,11 @@ Polaris treats a chart as the final compiled view of a verified dataset. The lan
 flowchart TD
     A["Natural-language request"] --> B{"Enough direct information?"}
     B -->|"no"| C["Compact intent resolution"]
-    B -->|"yes"| D["Connector registry"]
-    C --> D
-    D -->|"matched"| E["Official API or downloadable dataset"]
+    B -->|"yes"| X["Dimension and capability inspection"]
+    C --> X
+    X -->|"known unsupported slice"| Y["Explicit data-gap response"]
+    X -->|"eligible"| D["Connector registry"]
+    D -->|"exact match"| E["Official API or downloadable dataset"]
     D -->|"unmatched"| F["Bounded Web Search research"]
     E --> G["Parse and normalize"]
     F --> G
@@ -43,11 +45,14 @@ Every connector implements one method:
 ```ts
 type DataConnector = {
   id: string;
+  inspect?: (query: string) => ConnectorBoundary | null;
   tryResolve(query: string): Promise<DataConnectorResult | null>;
 };
 ```
 
-A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, and `dataQuality`. An unmatched connector returns `null`, allowing the next connector or the research fallback to run. Connector failures are isolated and also fall through to research.
+The optional inspection step declares a known semantic boundary before any data is fetched. It can stop a request with a precise data-gap explanation when an apparently similar aggregate would be wrong. A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, scope, and `dataQuality`. An unmatched connector returns `null`, allowing the next connector or the research fallback to run. Connector failures are isolated and also fall through to research.
+
+The invariant is: a connector may match only when every material qualifier is supported. Industry, occupation, geography, demographic group, calculation, and frequency are part of the data identity—not optional words. A connector must never remove one of those dimensions to make a request fit an available vector.
 
 The quality envelope records:
 
@@ -62,7 +67,9 @@ The quality envelope records:
 
 ### Statistics Canada WDS
 
-The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. It requests only the needed vectors and periods, then aligns regions and calculates changes locally.
+The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. Broad-industry unemployment uses Table 14-10-0022-01 and is explicitly marked as unadjusted and NAICS-based. It requests only the needed vectors and periods, then aligns regions or industries and calculates changes locally.
+
+Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The inspection boundary therefore blocks the overall Canada vector and offers either a labelled broad-industry proxy or a different exact measure such as employment or GDP.
 
 ### World Bank Indicators
 

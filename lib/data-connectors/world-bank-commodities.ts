@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { hasSubnationalGeography } from "./query-capabilities";
 import { readWorksheet } from "./xlsx";
 import {
   isChineseQuery,
@@ -152,7 +153,7 @@ function buildSummary(
 export const worldBankCommodityConnector: DataConnector = {
   id: "world-bank-commodity-prices",
   async tryResolve(query) {
-    if (wantsUnsupportedDailyFrequency(query)) return null;
+    if (wantsUnsupportedDailyFrequency(query) || hasSubnationalGeography(query)) return null;
     const selected = findCommodities(query);
     if (!selected.length) return null;
 

@@ -28,6 +28,26 @@ export function parseConversationContext(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 500) : "";
 }
 
+export function resolveDeterministicFollowUp(query: string, conversationContext: string) {
+  if (!conversationContext) return null;
+  const cleanQuery = query.trim();
+
+  if (/^(?:软件|IT|信息技术|计算机).{0,4}(?:行业|产业)$/i.test(cleanQuery)) {
+    return `${conversationContext.slice(0, 420)}; confirmed scope: software industry`.slice(0, 500);
+  }
+  if (/^(?:软件|IT|信息技术|计算机).{0,4}(?:职业|工种)$/i.test(cleanQuery)) {
+    return `${conversationContext.slice(0, 420)}; confirmed scope: software occupation`.slice(0, 500);
+  }
+
+  const confirmsCurrentRange = /^(?:当前|现在|到现在|对的|是的|没错|current|yes|correct)$/i.test(cleanQuery);
+  const hasRelativeRange = /(?:最近|过去|近|last|past).{0,16}(?:个?月|年|months?|years?)/i.test(conversationContext);
+  if (confirmsCurrentRange && hasRelativeRange) {
+    return `${conversationContext.slice(0, 400)}; rolling range ends at the latest available observation`.slice(0, 500);
+  }
+
+  return null;
+}
+
 export function inferResearchMode(query: string): ResearchMode {
   const complexPattern =
     /(每月|逐月|环比|同比|历史|最近.{0,8}(?:个月|年)|过去.{0,8}(?:个月|年)|monthly|month.over.month|year.over.year|historical|time.?series|last\s+\d+\s+(?:months|years))/i;

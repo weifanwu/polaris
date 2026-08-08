@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { detectMaterialQualifiers } from "./query-capabilities";
 import {
   isChineseQuery,
   requestedCalculation,
@@ -196,6 +197,52 @@ const RETAIL_VECTORS = {
   Nunavut: "v1446860188",
 } as const;
 
+const INDUSTRY_UNEMPLOYMENT_VECTORS = {
+  "Accommodation and food services [72]": "v2710271",
+  "Agriculture [111-112, 1100, 1151-1152]": "v2710248",
+  "Business, building and other support services [55, 56]": "v2710267",
+  "Construction [23]": "v2710254",
+  "Educational services [61]": "v2710268",
+  "Finance and insurance [52]": "v2710264",
+  "Health care and social assistance [62]": "v2710269",
+  "Information, culture and recreation [51, 71]": "v2710270",
+  "Manufacturing [31-33]": "v2710255",
+  "Other services (except public administration) [81]": "v2710272",
+  "Professional, scientific and technical services [54]": "v2710266",
+  "Public administration [91]": "v2710273",
+  "Real estate and rental and leasing [53]": "v2710265",
+  "Retail trade [44-45]": "v2710261",
+  "Transportation and warehousing [48-49]": "v2710262",
+  "Utilities [22]": "v2710253",
+  "Wholesale trade [41]": "v2710260",
+} as const;
+
+type IndustryDefinition = {
+  name: keyof typeof INDUSTRY_UNEMPLOYMENT_VECTORS;
+  zh: string;
+  aliases: RegExp[];
+};
+
+const INDUSTRIES: IndustryDefinition[] = [
+  { name: "Professional, scientific and technical services [54]", zh: "专业、科学和技术服务业 [54]", aliases: [/professional,? scientific and technical services/i, /professional services industry/i, /naics\s*54/i, /专业.*科学.*技术服务/] },
+  { name: "Information, culture and recreation [51, 71]", zh: "信息、文化和娱乐业 [51, 71]", aliases: [/information,? culture and recreation/i, /naics\s*(?:51.*71|51\s*and\s*71)/i, /信息.*文化.*娱乐/] },
+  { name: "Finance and insurance [52]", zh: "金融和保险业 [52]", aliases: [/finance and insurance/i, /financial services industry/i, /金融.*保险/] },
+  { name: "Real estate and rental and leasing [53]", zh: "房地产、租赁和出租业 [53]", aliases: [/real estate.*(?:rental|leasing)/i, /房地产.*(?:租赁|出租)/] },
+  { name: "Manufacturing [31-33]", zh: "制造业 [31-33]", aliases: [/manufacturing industry/i, /\bmanufacturing\b/i, /制造业/] },
+  { name: "Construction [23]", zh: "建筑业 [23]", aliases: [/construction industry/i, /\bconstruction\b/i, /建筑业/] },
+  { name: "Health care and social assistance [62]", zh: "医疗保健和社会援助业 [62]", aliases: [/health care and social assistance/i, /healthcare industry/i, /医疗保健.*社会援助|医疗行业/] },
+  { name: "Educational services [61]", zh: "教育服务业 [61]", aliases: [/educational services/i, /education industry/i, /教育服务业|教育行业/] },
+  { name: "Accommodation and food services [72]", zh: "住宿和餐饮服务业 [72]", aliases: [/accommodation and food services/i, /hospitality industry/i, /住宿.*餐饮|酒店餐饮业/] },
+  { name: "Retail trade [44-45]", zh: "零售业 [44-45]", aliases: [/retail trade industry/i, /retail industry/i, /零售业|零售行业/] },
+  { name: "Wholesale trade [41]", zh: "批发业 [41]", aliases: [/wholesale trade industry/i, /wholesale industry/i, /批发业|批发行业/] },
+  { name: "Transportation and warehousing [48-49]", zh: "运输和仓储业 [48-49]", aliases: [/transportation and warehousing/i, /logistics industry/i, /运输.*仓储|物流行业/] },
+  { name: "Public administration [91]", zh: "公共行政 [91]", aliases: [/public administration/i, /公共行政/] },
+  { name: "Agriculture [111-112, 1100, 1151-1152]", zh: "农业 [111-112]", aliases: [/agriculture industry/i, /agricultural sector/i, /农业/] },
+  { name: "Utilities [22]", zh: "公用事业 [22]", aliases: [/utilities industry/i, /utility sector/i, /公用事业/] },
+  { name: "Business, building and other support services [55, 56]", zh: "企业、楼宇和其他支持服务业 [55, 56]", aliases: [/business,? building and other support services/i, /企业.*楼宇.*支持服务/] },
+  { name: "Other services (except public administration) [81]", zh: "其他服务业（公共行政除外）[81]", aliases: [/other services.*except public administration/i, /其他服务业.*公共行政/] },
+];
+
 const GEO_ALIASES: Record<string, string[]> = {
   Canada: ["canada", "canadian", "加拿大", "全国"],
   "Newfoundland and Labrador": ["newfoundland", "labrador", "纽芬兰"],
@@ -324,15 +371,24 @@ function includesAlias(query: string, alias: string) {
   return normalizedQuery.includes(normalizedAlias);
 }
 
-function selectGeographies(query: string, vectors: VectorMap) {
-  let selected = Object.keys(vectors).filter((geo) => {
-    const aliases = GEO_ALIASES[geo] ?? [geo.split(",")[0]];
+function requestedGeographies(query: string) {
+  let selected = Object.keys(GEO_ALIASES).filter((geo) => {
+    const aliases = GEO_ALIASES[geo];
     return aliases.some((alias) => includesAlias(query, alias));
   });
   if (/(qu[eé]bec city|魁北克市)/i.test(query) && !/(qu[eé]bec province|province of qu[eé]bec|魁北克省|魁省)/i.test(query)) {
     selected = selected.filter((geo) => geo !== "Quebec");
   }
-  return (selected.length ? selected : vectors.Canada ? ["Canada"] : Object.keys(vectors).slice(0, 1)).slice(0, 5);
+  return selected;
+}
+
+function selectGeographies(query: string, vectors: VectorMap) {
+  const requested = requestedGeographies(query);
+  if (requested.length) {
+    if (requested.some((geo) => !vectors[geo])) return [];
+    return requested.slice(0, 5);
+  }
+  return (vectors.Canada ? ["Canada"] : Object.keys(vectors).slice(0, 1)).slice(0, 5);
 }
 
 function periodLabel(date: string, frequency: Frequency) {
@@ -410,6 +466,76 @@ function buildSummary(labels: string[], rows: Array<{ date: string; values: Arra
   }).join(" ").slice(0, 500);
 }
 
+function selectIndustries(query: string) {
+  return INDUSTRIES.filter((industry) => industry.aliases.some((alias) => alias.test(query))).slice(0, 5);
+}
+
+function hasIndustryQualifier(query: string) {
+  return /(?:\bindustry\b|\bsector\b|\bnaics\b|行业|产业|软件公司|information technology|\bit\s*行业|计算机行业|科技行业)/i.test(query);
+}
+
+function hasOccupationQualifier(query: string) {
+  return /(?:\boccupation\b|\bprofession\b|software developers?|programmers?|职业|工种|软件开发者|程序员)/i.test(query);
+}
+
+function isSoftwareIndustryUnemploymentQuery(query: string) {
+  const unemployment = /(unemployment|失业)/i.test(query);
+  const softwareIndustry = /(?:software (?:industry|sector|publishers?)|information technology (?:industry|sector)|computer (?:industry|sector)|\bit\s*(?:industry|sector|行业)|软件行业|软件产业|软件公司|信息技术行业|计算机行业|科技行业)/i.test(query);
+  return unemployment && softwareIndustry && !hasOccupationQualifier(query);
+}
+
+async function resolveIndustryUnemployment(query: string, industries: IndustryDefinition[]) {
+  const selectedRegions = selectGeographies(query, UNEMPLOYMENT_VECTORS);
+  if (!selectedRegions.length || selectedRegions.some((region) => region !== "Canada")) return null;
+
+  const chinese = isChineseQuery(query);
+  const requested = requestedMonthlyPeriods(query);
+  const vectors = industries.map((industry) => INDUSTRY_UNEMPLOYMENT_VECTORS[industry.name]);
+  const payload = await fetchVectors(vectors, requested);
+  const rows = calculateRows(payload, vectors, "monthly", requested, "level", (value) => value);
+  if (rows.length < 2) return null;
+
+  const labels = industries.map((industry) => chinese ? industry.zh : industry.name);
+  const numericCells = rows.flatMap((row) => row.values);
+  const availablePoints = numericCells.filter((value) => value !== null).length;
+  const missingPoints = numericCells.length - availablePoints;
+
+  return {
+    message: chinese
+      ? `已读取加拿大统计局按行业发布的月度失业率，校验 ${availablePoints}/${numericCells.length} 个数据点。该序列未经季节调整。`
+      : `Validated ${availablePoints}/${numericCells.length} monthly industry-unemployment observations from Statistics Canada. The series is not seasonally adjusted.`,
+    widget: {
+      title: chinese ? "加拿大行业失业率" : "Canadian industry unemployment rate",
+      subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · unadjusted · Statistics Canada 14-10-0022-01`,
+      visualization: "line_chart" as const,
+      columns: [
+        { key: "date", label: chinese ? "月份" : "Month", dataType: "date" as const, unit: null },
+        ...labels.map((label, index) => ({ key: `series_${index + 1}`, label, dataType: "number" as const, unit: "%" })),
+      ],
+      rows: rows.map((row) => ({ cells: [row.date, ...row.values.map((value) => toFixedCell(value, 1))] })),
+      summary: `${buildSummary(labels, rows, chinese)} ${chinese ? "行业分类采用 Statistics Canada 公布的 NAICS 宽口径，不等同于具体职业。" : "Industries use Statistics Canada's broad NAICS groups and are not occupations."}`.trim().slice(0, 500),
+      sources: [
+        { title: "Statistics Canada Table 14-10-0022-01", url: "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410002201" },
+        { title: "Statistics Canada Web Data Service", url: "https://www.statcan.gc.ca/en/developers/wds/user-guide" },
+      ],
+      dataQuality: {
+        method: "official_connector" as const,
+        sourceName: "Statistics Canada WDS",
+        requestedPoints: numericCells.length,
+        availablePoints,
+        missingPoints,
+        coverageStart: rows[0].date,
+        coverageEnd: rows.at(-1)!.date,
+        frequency: "monthly" as const,
+        verifiedAt: new Date().toISOString(),
+        scope: (chinese
+          ? `地区：加拿大 · 行业：${labels.join("、")} · 未经季节调整`
+          : `Geography: Canada · Industry: ${labels.join(", ")} · Not seasonally adjusted`).slice(0, 240),
+      },
+    },
+  };
+}
+
 function tradeMetric(query: string): Metric | null {
   if (!/(merchandise trade|imports?|exports?|进出口|进口|出口|贸易额)/i.test(query)) return null;
   const wantsImport = /(imports?|进口)/i.test(query);
@@ -433,11 +559,37 @@ function tradeMetric(query: string): Metric | null {
 
 export const statisticsCanadaConnector: DataConnector = {
   id: "statistics-canada-wds",
+  supportsQuery(query) {
+    const qualifiers = detectMaterialQualifiers(query);
+    if (!qualifiers.length) return true;
+    return qualifiers.every((qualifier) => qualifier === "industry")
+      && selectIndustries(query).length > 0
+      && /(unemployment rate|unemployment|失业率|失业数据)/i.test(query);
+  },
+  inspect(query) {
+    if (!isSoftwareIndustryUnemploymentQuery(query)) return null;
+    if (/(?:网上|网页|web)\s*(?:搜索|检索|search)|搜索.*(?:代理|替代|非官方)|try.*web/i.test(query)) return null;
+    const chinese = isChineseQuery(query);
+    return {
+      status: "cannot_answer",
+      message: chinese
+        ? "加拿大统计局没有“软件/IT行业”的独立月度失业率序列；软件企业分散在软件出版、计算机系统设计等多个 NAICS 分类中，不能诚实地用全国总体失业率代替。可改问“加拿大专业、科学和技术服务业最近10年月度失业率”（NAICS 54，宽口径代理），查看计算机系统设计行业的就业/GDP，或说“继续网上搜索代理数据”。"
+        : "Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software businesses span multiple NAICS classes, so the national unemployment rate is not a valid substitute. Try broad NAICS 54 unemployment, employment/GDP for computer systems design, or ask to continue with Web Search for proxy data.",
+      conversationContext: query,
+    };
+  },
   async tryResolve(query) {
     if (wantsUnsupportedDailyFrequency(query)) return null;
     if (/(united states|\bu\.?s\.?a?\b|美国|china|中国|united kingdom|英国|japan|日本|australia|澳大利亚)/i.test(query)) return null;
+
+    const industries = selectIndustries(query);
+    if (industries.length && /(unemployment rate|unemployment|失业率|失业数据)/i.test(query)) {
+      return resolveIndustryUnemployment(query, industries);
+    }
+
     const metric = METRICS.find((candidate) => candidate.aliases.some((alias) => alias.test(query))) ?? tradeMetric(query);
     if (!metric) return null;
+    if (industries.length || hasIndustryQualifier(query) || hasOccupationQualifier(query)) return null;
 
     const chinese = isChineseQuery(query);
     const trade = metric.id === "trade";
@@ -467,6 +619,10 @@ export const statisticsCanadaConnector: DataConnector = {
     const missingPoints = numericCells.length - availablePoints;
     const sourceUrl = `https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=${metric.tableId}01`;
     const titleMetric = chinese ? metric.zh : metric.title;
+    const aggregateIndustry = ["unemployment", "employment_rate", "participation", "employment", "wages", "gdp"].includes(metric.id);
+    const scope = (chinese
+      ? `地区：${trade ? "加拿大" : labels.join("、")}${aggregateIndustry ? " · 行业：全部行业" : ""}`
+      : `Geography: ${trade ? "Canada" : labels.join(", ")}${aggregateIndustry ? " · Industry: total, all industries" : ""}`).slice(0, 240);
 
     return {
       message: chinese
@@ -501,6 +657,7 @@ export const statisticsCanadaConnector: DataConnector = {
           coverageEnd: rows.at(-1)!.date,
           frequency: metric.frequency,
           verifiedAt: new Date().toISOString(),
+          scope,
         },
       },
     };

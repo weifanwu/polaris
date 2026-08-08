@@ -210,6 +210,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .widget-title-row h3 { margin: 0; overflow: hidden; color: #eef4f6; font-size: 13px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .quality-pill { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border: 1px solid rgba(113, 156, 165, .28); border-radius: 999px; color: #83aeb7; background: rgba(45, 73, 80, .22); font-size: 7px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
 .quality-pill.official { color: #7ee9c4; border-color: rgba(70, 214, 166, .32); background: rgba(18, 91, 70, .22); }
+.widget-scope { display: block; margin-top: 3px; color: #8aa1a8; font-family: var(--font-geist-mono), monospace; font-size: 8px; line-height: 1.35; }
 .widget-heading p { margin: 5px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .demo-pill { flex: 0 0 auto; padding: 3px 6px; color: var(--amber); border: 1px solid rgba(245, 158, 11, .28); border-radius: 10px; background: rgba(245, 158, 11, .07); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .widget-actions { display: flex; flex: 0 0 auto; }

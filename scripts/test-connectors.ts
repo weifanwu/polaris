@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { resolveWithOfficialConnector } from "../lib/data-connectors/index";
+import {
+  inspectOfficialConnectorBoundary,
+  resolveWithOfficialConnector,
+} from "../lib/data-connectors/index";
 
 const gold = await resolveWithOfficialConnector("过去两年的金价，按月画折线图");
 assert.ok(gold, "World Bank commodity connector should answer gold queries");
@@ -17,6 +20,34 @@ assert.ok(unemployment, "Statistics Canada connector should answer unemployment 
 assert.equal(unemployment.widget.dataQuality?.sourceName, "Statistics Canada WDS");
 assert.equal(unemployment.widget.columns.length, 3, "Canada/Ontario comparison should contain two series");
 assert.equal(unemployment.widget.rows.length, 24);
+
+const softwareBoundary = inspectOfficialConnectorBoundary("加拿大IT行业最近10年月度失业率");
+assert.equal(softwareBoundary?.status, "cannot_answer", "unsupported software-industry unemployment must be blocked explicitly");
+assert.match(softwareBoundary?.message ?? "", /不能诚实地用全国总体失业率代替/, "the boundary should explain why the overall rate is invalid");
+
+const incorrectSoftwareFallback = await resolveWithOfficialConnector("加拿大软件行业最近10年月度失业率");
+assert.equal(incorrectSoftwareFallback, null, "software-industry qualifiers must never fall back to Canada's overall unemployment vector");
+
+const industryUnemployment = await resolveWithOfficialConnector("加拿大专业、科学和技术服务业最近10年月度失业率");
+assert.ok(industryUnemployment, "Statistics Canada should answer supported broad-industry unemployment queries");
+assert.equal(industryUnemployment.widget.rows.length, 120);
+assert.match(industryUnemployment.widget.columns[1].label, /专业、科学和技术服务业/);
+assert.match(industryUnemployment.widget.subtitle, /14-10-0022-01/);
+
+const unsupportedIndustryWage = await resolveWithOfficialConnector("加拿大IT行业最近10年平均时薪");
+assert.equal(unsupportedIndustryWage, null, "an industry qualifier must not be discarded by the general wage connector");
+
+const unsupportedRegionalGdp = await resolveWithOfficialConnector("比较加拿大和安大略省最近24个月GDP");
+assert.equal(unsupportedRegionalGdp, null, "an unsupported subnational geography must not fall back to Canada-only GDP");
+
+const unsupportedRegionalMortgage = await resolveWithOfficialConnector("安大略省最近12个月五年期房贷利率");
+assert.equal(unsupportedRegionalMortgage, null, "a national Bank of Canada series must not be labelled as an Ontario series");
+
+const unsupportedYouthRate = await resolveWithOfficialConnector("加拿大青年最近24个月失业率");
+assert.equal(unsupportedYouthRate, null, "an age qualifier must not fall back to the all-ages unemployment rate");
+
+const unsupportedFoodCpi = await resolveWithOfficialConnector("加拿大最近24个月食品CPI");
+assert.equal(unsupportedFoodCpi, null, "a CPI category qualifier must not fall back to all-items CPI");
 
 const housing = await resolveWithOfficialConnector("过去两年多伦多和渥太华新房价格指数每月环比");
 assert.ok(housing, "Statistics Canada connector should answer new-housing price queries");

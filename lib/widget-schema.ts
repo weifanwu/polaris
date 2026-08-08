@@ -33,6 +33,7 @@ export const dataQualitySchema = z.object({
   coverageEnd: z.string().max(40).nullable(),
   frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "annual", "mixed", "unknown"]),
   verifiedAt: z.string().datetime(),
+  scope: z.string().max(240).optional(),
 });
 
 export const widgetSpecSchema = z

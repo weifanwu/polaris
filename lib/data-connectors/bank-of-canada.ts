@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { hasSubnationalGeography } from "./query-capabilities";
 import {
   isChineseQuery,
   requestedDailyPeriods,
@@ -33,6 +34,7 @@ type ValetResponse = {
 export const bankOfCanadaConnector: DataConnector = {
   id: "bank-of-canada-valet",
   async tryResolve(query) {
+    if (hasSubnationalGeography(query)) return null;
     const selected = SERIES.filter((series) => series.aliases.some((alias) => alias.test(query))).slice(0, 4);
     if (!selected.length) return null;
 

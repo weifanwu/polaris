@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { hasSubnationalGeography } from "./query-capabilities";
 import {
   isChineseQuery,
   requestedCalculation,
@@ -37,7 +38,7 @@ type BlsResponse = {
 export const usBureauLaborStatisticsConnector: DataConnector = {
   id: "us-bls-public-data-api",
   async tryResolve(query) {
-    if (wantsUnsupportedDailyFrequency(query)) return null;
+    if (wantsUnsupportedDailyFrequency(query) || hasSubnationalGeography(query)) return null;
     if (!/(united states|\bu\.?s\.?a?\b|american|美国)/i.test(query)) return null;
     if (/(canada|canadian|加拿大|中国|china|英国|united kingdom|日本|japan)/i.test(query)) return null;
     const series = SERIES.find((candidate) => candidate.aliases.some((alias) => alias.test(query)));
