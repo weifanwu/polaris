@@ -52,10 +52,11 @@ Most AI data answers disappear into chat history. Polaris turns each successful 
 
 Ask questions such as:
 
-- “Show Microsoft’s closing price for the last seven completed trading days.”
-- “Compare the monthly CPI inflation rate in Canada and the United States for the last 12 complete months.”
-- “Compare the monthly change in MLS® HPI benchmark prices across GTA and Ottawa, leaving unverifiable months blank.”
-- “Show the Bank of Canada policy-rate changes over the last year.”
+- “Compare Canada and Ontario's monthly unemployment rate over the last two years.”
+- “Compare the monthly change in Toronto and Ottawa–Gatineau's New Housing Price Index over the last two years.”
+- “Compare GDP in Canada, the United States, and China over the last decade.”
+- “Show the Bank of Canada policy rate and CORRA over the last year.”
+- “Compare monthly gold, silver, and WTI prices over the last five years.”
 
 Polaris preserves the request, retrieved values, source links, visualization choice, and refresh state in one portable `WidgetSpec`.
 
@@ -75,7 +76,7 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Routes supported requests to official APIs and downloadable workbooks before using Web Search.
 - Parses source XLSX/ZIP files in the application runtime instead of asking the model to copy values from search snippets.
 - Performs date alignment, missing-value handling, month-over-month calculations, and coverage checks in deterministic code.
-- Includes first-party connectors for the World Bank Pink Sheet and Bank of Canada Valet API.
+- Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
 - Falls back cleanly to the bounded research agent when no connector matches.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
 
@@ -163,10 +164,15 @@ The detailed design and connector contract are documented in [docs/ARCHITECTURE.
 
 | Connector | Coverage | Transport | Processing |
 | --- | --- | --- | --- |
+| Statistics Canada WDS | Canadian CPI, employment, unemployment, labour-force participation, hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade | Official JSON API with stable vectors | Province/CMA selection, monthly or quarterly alignment, unit normalization, MoM/YoY calculation |
+| Bank of Canada Valet | Policy rate, Bank Rate, CORRA, prime and mortgage rates, Government of Canada bond yields, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
+| World Bank Indicators | Cross-country GDP, growth, population, inflation, unemployment, life expectancy, emissions, trade, debt, internet use, and fertility | Official JSON API | Country comparison, annual alignment, missing-observation checks, annual change calculation |
 | World Bank Pink Sheet | Gold, silver, energy, metals, and major agricultural commodities | Official monthly XLSX | Sheet discovery, unit extraction, rolling period selection, MoM/YoY calculation |
-| Bank of Canada Valet | Policy rate, prime rate, selected mortgage rates, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
+| U.S. Bureau of Labor Statistics | U.S. CPI/core CPI, unemployment, participation, nonfarm payrolls, employment, and average hourly earnings | Official JSON API | Monthly alignment, seasonal-series selection, MoM/YoY calculation |
 
 Connectors are tried in a fixed registry and must return the same validated `WidgetSpec` as the research route. This keeps rendering independent from how data was acquired and makes additional sources straightforward to add without expanding the model prompt.
+
+The Canadian catalog uses Statistics Canada vector identifiers, which remain stable across table updates. A connector request sends only the selected vectors and requested number of periods to the publisher; full tables and long data histories are not sent through a language model. Up to five regions or countries can be aligned in one widget, and unsupported mixed-source requests fall through to bounded research instead of returning a misleading partial comparison.
 
 ## Cost-aware model routing
 
@@ -204,6 +210,7 @@ Polaris follows a strict evidence contract:
 - A widget is rejected when it has no trustworthy source or cannot be rendered honestly.
 - Each generated widget records acquisition method, requested and available observations, missing observations, actual coverage, frequency, and verification time.
 - A source connector is not added when its publisher's terms do not permit the intended charting or redistribution workflow.
+- Proprietary MLS®/CREA feeds are not silently scraped or redistributed; Polaris uses Statistics Canada's New Housing Price Index unless a properly licensed housing feed is configured in the future.
 
 Web Search is inherently nondeterministic, and third-party pages can change or become unavailable. Verify financial, medical, legal, and other high-stakes information against the linked original source.
 

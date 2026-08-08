@@ -60,6 +60,14 @@ The quality envelope records:
 
 ## Implemented sources
 
+### Statistics Canada WDS
+
+The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. It requests only the needed vectors and periods, then aligns regions and calculates changes locally.
+
+### World Bank Indicators
+
+The connector uses the official Indicators API for comparable annual country data. It supports up to five countries or aggregates in one request and covers GDP, GDP growth, population, inflation, unemployment, life expectancy, carbon emissions, trade openness, government debt, internet use, and fertility. Monthly and quarterly requests are deliberately rejected because the source is annual.
+
 ### World Bank Pink Sheet
 
 The connector discovers and downloads the current World Bank monthly commodity workbook, resolves the `Monthly Prices` worksheet through XLSX relationships, decodes shared strings and numeric cells, reads units from the workbook, and selects up to 120 current observations. Month-over-month and year-over-year changes are calculated only when both required source values exist.
@@ -68,7 +76,11 @@ The workbook is size-limited, host-validated, and cached for six hours. Gold, si
 
 ### Bank of Canada Valet
 
-The connector calls the official public JSON API for supported series. Daily observations can remain daily; longer histories are deterministically aligned to the last available observation in each month. It currently covers the policy interest rate, prime rate, a selected five-year posted mortgage rate, and major CAD exchange-rate pairs.
+The connector calls the official public JSON API for supported series. Daily observations can remain daily; longer histories are deterministically aligned to the last available observation in each month. It covers the policy interest rate, Bank Rate, CORRA, prime and mortgage rates, Government of Canada benchmark bond yields, and major CAD exchange-rate pairs.
+
+### U.S. Bureau of Labor Statistics
+
+The connector uses the BLS Public Data API for seasonally adjusted U.S. CPI, core CPI, unemployment, labour-force participation, employment, nonfarm payrolls, and average hourly earnings. Month-over-month and year-over-year changes are calculated from the retrieved index or level observations.
 
 ## Chart compiler
 
@@ -99,4 +111,4 @@ An official source is not automatically safe to integrate. Before adding a conne
 7. Register the connector in `lib/data-connectors/index.ts`.
 8. Add parser/unit tests and a live integration assertion.
 
-The next high-value additions are Statistics Canada WDS, U.S. BLS, FRED, and licensed housing-market feeds. Each should reuse the same request and quality contracts rather than adding source-specific behavior to the chart layer.
+Future additions should prioritize stable official APIs such as OECD, IMF, Eurostat, and licensed housing-market feeds. Each must reuse the same request and quality contracts rather than adding source-specific behavior to the chart layer.

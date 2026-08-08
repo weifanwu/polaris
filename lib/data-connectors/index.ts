@@ -1,8 +1,17 @@
 import { bankOfCanadaConnector } from "./bank-of-canada";
+import { statisticsCanadaConnector } from "./statistics-canada";
 import type { DataConnectorResult } from "./types";
+import { usBureauLaborStatisticsConnector } from "./us-bureau-labor-statistics";
 import { worldBankCommodityConnector } from "./world-bank-commodities";
+import { worldBankIndicatorsConnector } from "./world-bank-indicators";
 
-const CONNECTORS = [worldBankCommodityConnector, bankOfCanadaConnector];
+const CONNECTORS = [
+  worldBankCommodityConnector,
+  bankOfCanadaConnector,
+  worldBankIndicatorsConnector,
+  usBureauLaborStatisticsConnector,
+  statisticsCanadaConnector,
+];
 
 export async function resolveWithOfficialConnector(query: string): Promise<DataConnectorResult | null> {
   for (const connector of CONNECTORS) {

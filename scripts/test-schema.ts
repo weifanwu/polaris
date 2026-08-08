@@ -6,7 +6,13 @@ import {
   parseConversationHistory,
 } from "../lib/agent-policy";
 import { toChartData } from "../components/widgets/chart-data";
-import { requestedCalculation, requestedMonthlyPeriods } from "../lib/data-connectors/query-utils";
+import {
+  requestedAnnualPeriods,
+  requestedCalculation,
+  requestedDailyPeriods,
+  requestedMonthlyPeriods,
+  requestedQuarterlyPeriods,
+} from "../lib/data-connectors/query-utils";
 import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { strToU8, zipSync } from "fflate";
@@ -151,7 +157,11 @@ assert.equal(chartWithGap[0].ottawa, null, "missing numeric values should render
 assert.equal(chartWithGap[0].toronto, 1.2, "verified numeric values should remain numeric");
 
 assert.equal(requestedMonthlyPeriods("过去两年的金价"), 24, "Chinese year ranges should become monthly periods");
+assert.equal(requestedMonthlyPeriods("过去二十四个月的CPI"), 24, "compound Chinese numerals should be parsed");
 assert.equal(requestedMonthlyPeriods("last 18 months of silver"), 18, "English month ranges should be parsed");
+assert.equal(requestedDailyPeriods("最近7个交易日"), 7, "daily trading periods should be parsed");
+assert.equal(requestedQuarterlyPeriods("过去五年人口"), 20, "year ranges should become quarterly periods");
+assert.equal(requestedAnnualPeriods("过去十年GDP"), 10, "annual periods should be parsed");
 assert.equal(requestedCalculation("黄金每个月环比"), "mom", "month-over-month calculations should be explicit");
 
 const workbook = zipSync({
@@ -164,4 +174,4 @@ const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (21 cases).");
+console.log("Polaris schema, connector, and agent-policy tests passed (25 cases).");

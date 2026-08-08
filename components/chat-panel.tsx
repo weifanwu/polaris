@@ -5,9 +5,9 @@ import { ArrowUp, Bot, ChevronRight, PanelRightClose, PanelRightOpen, Search, Sp
 import type { ChatMessage } from "@/types";
 
 export const examplePrompts = [
-  "显示微软最近 7 个交易日的收盘价",
-  "显示加拿大央行最近一年的政策利率变化",
-  "比较今天黄金和白银的价格",
+  "比较过去两年加拿大和安大略省每月失业率",
+  "过去两年多伦多和渥太华新房价格指数每月环比",
+  "比较过去10年加拿大、美国和中国的GDP",
 ];
 
 type Props = {
@@ -76,7 +76,7 @@ export function ChatPanel({
           <div className="chat-welcome">
             <div className="agent-avatar"><Sparkles size={18} /></div>
             <h3>What would you like to track?</h3>
-            <p>I’ll search the live web, structure the numbers, and add one useful widget to your dashboard.</p>
+            <p>I’ll query official data connectors first, then use bounded web research only when needed.</p>
             <div className="example-list">
               {examplePrompts.map((prompt) => (
                 <button key={prompt} onClick={() => onQueryChange(prompt)}>
