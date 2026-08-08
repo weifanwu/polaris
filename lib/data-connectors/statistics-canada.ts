@@ -478,12 +478,6 @@ function hasOccupationQualifier(query: string) {
   return /(?:\boccupation\b|\bprofession\b|software developers?|programmers?|职业|工种|软件开发者|程序员)/i.test(query);
 }
 
-function isSoftwareIndustryUnemploymentQuery(query: string) {
-  const unemployment = /(unemployment|失业)/i.test(query);
-  const softwareIndustry = /(?:software (?:industry|sector|publishers?)|information technology (?:industry|sector)|computer (?:industry|sector)|\bit\s*(?:industry|sector|行业)|软件行业|软件产业|软件公司|信息技术行业|计算机行业|科技行业)/i.test(query);
-  return unemployment && softwareIndustry && !hasOccupationQualifier(query);
-}
-
 async function resolveIndustryUnemployment(query: string, industries: IndustryDefinition[]) {
   const selectedRegions = selectGeographies(query, UNEMPLOYMENT_VECTORS);
   if (!selectedRegions.length || selectedRegions.some((region) => region !== "Canada")) return null;
@@ -565,18 +559,6 @@ export const statisticsCanadaConnector: DataConnector = {
     return qualifiers.every((qualifier) => qualifier === "industry")
       && selectIndustries(query).length > 0
       && /(unemployment rate|unemployment|失业率|失业数据)/i.test(query);
-  },
-  inspect(query) {
-    if (!isSoftwareIndustryUnemploymentQuery(query)) return null;
-    if (/(?:网上|网页|web)\s*(?:搜索|检索|search)|搜索.*(?:代理|替代|非官方)|try.*web/i.test(query)) return null;
-    const chinese = isChineseQuery(query);
-    return {
-      status: "cannot_answer",
-      message: chinese
-        ? "加拿大统计局没有“软件/IT行业”的独立月度失业率序列；软件企业分散在软件出版、计算机系统设计等多个 NAICS 分类中，不能诚实地用全国总体失业率代替。可改问“加拿大专业、科学和技术服务业最近10年月度失业率”（NAICS 54，宽口径代理），查看计算机系统设计行业的就业/GDP，或说“继续网上搜索代理数据”。"
-        : "Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software businesses span multiple NAICS classes, so the national unemployment rate is not a valid substitute. Try broad NAICS 54 unemployment, employment/GDP for computer systems design, or ask to continue with Web Search for proxy data.",
-      conversationContext: query,
-    };
   },
   async tryResolve(query) {
     if (wantsUnsupportedDailyFrequency(query)) return null;

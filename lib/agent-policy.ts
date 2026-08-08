@@ -59,3 +59,16 @@ export function inferPartialDataPolicy(query: string) {
     query,
   );
 }
+
+export function buildResearchFallbackInstruction(query: string) {
+  const hasMaterialSlice =
+    /(?:\bindustry\b|\bsector\b|\boccupation\b|\bprofession\b|\bnaics\b|行业|产业|职业|工种|青年|老年|男性|女性|食品|能源|核心|省|州|城市)/i.test(query);
+
+  return `The deterministic connector registry did not return an exact match. Web research is mandatory for this request.
+- Search for the exact requested metric and every requested dimension first; do not stop merely because one official API lacks the series.
+- Search credible primary data, downloadable tables, government releases, industry reports, and well-attributed secondary sources.
+- If the exact series cannot be verified, search for a useful adjacent or proxy measure before returning cannot_answer.
+- A proxy result must be named as a proxy in the title, subtitle, column labels, and summary, and must explain how its scope differs from the request.
+- Never substitute a national total or another aggregate for a requested subgroup${hasMaterialSlice ? "; this request contains a material subgroup/category qualifier" : ""}.
+- Return cannot_answer only after the web-search budget cannot find either the exact series or a useful, honestly labelled proxy.`;
+}

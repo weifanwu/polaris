@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildResearchFallbackInstruction,
   inferPartialDataPolicy,
   inferResearchMode,
   parseConversationContext,
@@ -153,6 +154,11 @@ assert.equal(
   "explicit completeness requirements should disable partial data",
 );
 
+const researchFallback = buildResearchFallbackInstruction("加拿大IT行业最近10年月度失业率");
+assert.match(researchFallback, /Web research is mandatory/, "connector misses must trigger web research");
+assert.match(researchFallback, /proxy/, "research should try honestly labelled proxy measures before failing");
+assert.match(researchFallback, /Never substitute a national total/, "research must preserve qualified scope");
+
 const chartWithGap = toChartData(
   widgetSpecSchema.parse({
     ...valid,
@@ -185,4 +191,4 @@ const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (27 cases).");
+console.log("Polaris schema, connector, and agent-policy tests passed (30 cases).");

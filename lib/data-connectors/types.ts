@@ -7,15 +7,8 @@ export type DataConnectorResult = {
   widget: ConnectorWidget;
 };
 
-export type ConnectorBoundary = {
-  status: "needs_clarification" | "cannot_answer";
-  message: string;
-  conversationContext?: string;
-};
-
 export type DataConnector = {
   id: string;
-  inspect?: (query: string) => ConnectorBoundary | null;
   supportsQuery?: (query: string) => boolean;
   tryResolve: (query: string) => Promise<DataConnectorResult | null>;
 };

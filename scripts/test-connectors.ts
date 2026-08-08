@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  inspectOfficialConnectorBoundary,
-  resolveWithOfficialConnector,
-} from "../lib/data-connectors/index";
+import { resolveWithOfficialConnector } from "../lib/data-connectors/index";
 
 const gold = await resolveWithOfficialConnector("过去两年的金价，按月画折线图");
 assert.ok(gold, "World Bank commodity connector should answer gold queries");
@@ -20,10 +17,6 @@ assert.ok(unemployment, "Statistics Canada connector should answer unemployment 
 assert.equal(unemployment.widget.dataQuality?.sourceName, "Statistics Canada WDS");
 assert.equal(unemployment.widget.columns.length, 3, "Canada/Ontario comparison should contain two series");
 assert.equal(unemployment.widget.rows.length, 24);
-
-const softwareBoundary = inspectOfficialConnectorBoundary("加拿大IT行业最近10年月度失业率");
-assert.equal(softwareBoundary?.status, "cannot_answer", "unsupported software-industry unemployment must be blocked explicitly");
-assert.match(softwareBoundary?.message ?? "", /不能诚实地用全国总体失业率代替/, "the boundary should explain why the overall rate is invalid");
 
 const incorrectSoftwareFallback = await resolveWithOfficialConnector("加拿大软件行业最近10年月度失业率");
 assert.equal(incorrectSoftwareFallback, null, "software-industry qualifiers must never fall back to Canada's overall unemployment vector");

@@ -78,7 +78,8 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Performs date alignment, missing-value handling, month-over-month calculations, and coverage checks in deterministic code.
 - Checks requested dimensions before accepting a connector match; industry, occupation, geography, and frequency qualifiers cannot be silently discarded.
 - Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
-- Falls back cleanly to the bounded research agent when no connector matches.
+- Automatically falls back to the bounded research agent when a connector is unsupported, unmatched, or unavailable.
+- Searches for the exact requested slice first, then honestly labelled proxy measures; it never relabels a national aggregate as an industry or occupation result.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
 
 ### Multi-turn clarification and memory
@@ -411,7 +412,7 @@ Clarification response:
 }
 ```
 
-If the available evidence cannot support a useful widget, the endpoint returns `cannot_answer` without inventing rows.
+If no exact connector matches, Web Search is mandatory. The research path checks the requested slice first and then useful, explicitly labelled proxy measures. Only when the search budget finds neither may the endpoint return `cannot_answer`; it never invents rows or silently substitutes an aggregate.
 
 ## Project structure
 

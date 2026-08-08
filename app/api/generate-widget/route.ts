@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import {
+  buildResearchFallbackInstruction,
   inferPartialDataPolicy,
   inferResearchMode,
   parseConversationContext,
@@ -15,10 +16,7 @@ import {
   getOpenAIIntentModel,
   getOpenAIModel,
 } from "@/lib/openai";
-import {
-  inspectOfficialConnectorBoundary,
-  resolveWithOfficialConnector,
-} from "@/lib/data-connectors";
+import { resolveWithOfficialConnector } from "@/lib/data-connectors";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -51,7 +49,7 @@ const SYSTEM_PROMPT = `Goal: create one source-backed dashboard widget from a re
 Success criteria:
 - Search with concise English identifiers as needed and prefer official or primary data pages.
 - Use only retrieved numbers. Never recall, estimate, interpolate, or silently convert missing values to zero.
-- Return 2–30 useful rows when charting a series, no more than 6 columns, and exactly one string cell per column.
+- Return 2–120 useful rows when charting a series, no more than 6 columns, and exactly one string cell per column. When a verified source exposes the requested history, preserve the full requested range instead of truncating it to a sample.
 - For charts, the first column is the x-axis and remaining series are numeric. Use an empty string for a genuinely missing numeric value.
 - Stop as soon as the available evidence can answer the core request usefully. Search again only for a missing required fact or comparison series.
 - For fragmented series, split searches by source, entity, or date range instead of repeating the same broad query.
@@ -59,7 +57,8 @@ Success criteria:
 - If partial data is allowed, do not reject a useful chart because some requested dates are unavailable. Include verified rows, preserve gaps, and state the actual coverage and omissions in the subtitle or summary.
 - For comparisons, align matching dates when possible. Rows may contain one verified series and one empty cell when coverage differs.
 - Satisfy every qualifier in the resolved request. Never replace an industry, occupation, geography, demographic group, or frequency with an aggregate merely because aggregate data is easier to find.
-- If the exact qualified series is unavailable, return cannot_answer and name the missing dimension; do not label an aggregate chart as the requested subgroup.
+- If the exact qualified series is unavailable, search for a credible adjacent or proxy measure before failing. Label any proxy explicitly in the title, subtitle, columns, and summary, and explain the scope difference.
+- Never label an aggregate chart as the requested subgroup. A national total is not a valid proxy for an industry, occupation, geography, demographic group, or category unless the user explicitly asks for that total.
 - Return cannot_answer only when fewer than two useful chart rows can be verified, no trustworthy source exists, or the result cannot be rendered honestly.
 
 Output only the required structured result. Every success must contain a non-empty widget.`;
@@ -196,21 +195,6 @@ function connectorResponse(
   }));
 }
 
-function connectorBoundaryResponse(
-  query: string,
-  usage: RequestUsage,
-) {
-  const boundary = inspectOfficialConnectorBoundary(query);
-  if (!boundary) return null;
-  return Response.json(generateWidgetResultSchema.parse({
-    status: boundary.status,
-    message: boundary.message.trim().slice(0, 500),
-    widget: null,
-    conversationContext: (boundary.conversationContext ?? query).slice(0, 500),
-    usage,
-  }));
-}
-
 function friendlyError(error: unknown) {
   if (error instanceof OpenAI.AuthenticationError) {
     return [401, "OpenAI API key 无效，请检查 OPENAI_API_KEY。"] as const;
@@ -257,6 +241,7 @@ Partial verified rows: ${allowPartialData ? "allowed and preferred over failure"
       input: [
         { role: "developer", content: SYSTEM_PROMPT },
         { role: "developer", content: researchBrief },
+        { role: "developer", content: buildResearchFallbackInstruction(query) },
         { role: "user", content: query },
       ],
       text: {
@@ -327,8 +312,6 @@ export async function POST(request: Request) {
 
   try {
     if ((!conversationContext && history.length === 0) || skipClarification) {
-      const directBoundaryResponse = connectorBoundaryResponse(query, ZERO_USAGE);
-      if (directBoundaryResponse) return directBoundaryResponse;
       const directResult = await resolveWithOfficialConnector(query);
       const directResponse = connectorResponse(directResult, query, ZERO_USAGE);
       if (directResponse) return directResponse;
@@ -389,12 +372,6 @@ export async function POST(request: Request) {
         allowPartialData = intent.allowPartialData;
       }
     }
-
-    const resolvedBoundaryResponse = connectorBoundaryResponse(
-      resolvedQuery,
-      intentUsage ?? ZERO_USAGE,
-    );
-    if (resolvedBoundaryResponse) return resolvedBoundaryResponse;
 
     const connectorResult = await resolveWithOfficialConnector(resolvedQuery);
     const resolvedConnectorResponse = connectorResponse(

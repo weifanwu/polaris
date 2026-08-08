@@ -10,12 +10,14 @@ flowchart TD
     B -->|"no"| C["Compact intent resolution"]
     B -->|"yes"| X["Dimension and capability inspection"]
     C --> X
-    X -->|"known unsupported slice"| Y["Explicit data-gap response"]
-    X -->|"eligible"| D["Connector registry"]
+    X --> D["Connector registry"]
     D -->|"exact match"| E["Official API or downloadable dataset"]
-    D -->|"unmatched"| F["Bounded Web Search research"]
+    D -->|"unsupported or unmatched"| F["Mandatory bounded Web Search research"]
+    F -->|"exact series unavailable"| P["Search and label credible proxy measures"]
+    P -->|"useful proxy found"| G
+    P -->|"no defensible proxy"| Q["Cannot answer with search usage reported"]
     E --> G["Parse and normalize"]
-    F --> G
+    F -->|"exact series found"| G
     G --> H["Align dates and calculate"]
     H --> I["Validate schema, units, gaps, and coverage"]
     I --> J["Compile ECharts option"]
@@ -45,12 +47,12 @@ Every connector implements one method:
 ```ts
 type DataConnector = {
   id: string;
-  inspect?: (query: string) => ConnectorBoundary | null;
+  supportsQuery?: (query: string) => boolean;
   tryResolve(query: string): Promise<DataConnectorResult | null>;
 };
 ```
 
-The optional inspection step declares a known semantic boundary before any data is fetched. It can stop a request with a precise data-gap explanation when an apparently similar aggregate would be wrong. A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, scope, and `dataQuality`. An unmatched connector returns `null`, allowing the next connector or the research fallback to run. Connector failures are isolated and also fall through to research.
+The capability check prevents a connector from running when it cannot preserve every material dimension. A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, scope, and `dataQuality`. An unsupported or unmatched connector returns `null`, allowing the next connector and then the research fallback to run. Connector failures are isolated and also fall through to research; a known connector gap is never a reason to skip Web Search.
 
 The invariant is: a connector may match only when every material qualifier is supported. Industry, occupation, geography, demographic group, calculation, and frequency are part of the data identity—not optional words. A connector must never remove one of those dimensions to make a request fit an available vector.
 
@@ -69,7 +71,7 @@ The quality envelope records:
 
 The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. Broad-industry unemployment uses Table 14-10-0022-01 and is explicitly marked as unadjusted and NAICS-based. It requests only the needed vectors and periods, then aligns regions or industries and calculates changes locally.
 
-Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The inspection boundary therefore blocks the overall Canada vector and offers either a labelled broad-industry proxy or a different exact measure such as employment or GDP.
+Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The capability guard therefore blocks the overall Canada vector, then automatically routes the request to Web Search. Research looks for an exact external series first and then for clearly labelled proxies such as broad-industry unemployment, software-industry employment, vacancies, layoffs, or GDP. Only a failed exact-and-proxy search may return `cannot_answer`.
 
 ### World Bank Indicators
 
