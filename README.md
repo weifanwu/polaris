@@ -1,152 +1,201 @@
-# 北极星 Polaris
+# Polaris
 
 <p align="center">
-  <strong>把自然语言数据问题，变成可验证、可排列、可刷新的实时数据组件。</strong>
+  <strong>A live, source-backed data dashboard built from natural-language questions.</strong>
 </p>
 
 <p align="center">
-  <a href="https://polaris-weifanwu.deep-robin-3429.chatgpt.site">Live Demo</a>
+  <a href="https://polaris-weifanwu.deep-robin-3429.chatgpt.site"><img alt="Live" src="https://img.shields.io/badge/status-live-22d3ee"></a>
+  <a href="./LICENSE"><img alt="PolyForm Noncommercial License" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-a78bfa"></a>
+  <img alt="Node.js 22.13 or newer" src="https://img.shields.io/badge/node-%3E%3D22.13-339933">
+  <img alt="React 19" src="https://img.shields.io/badge/react-19-61dafb">
+</p>
+
+<p align="center">
+  <a href="https://polaris-weifanwu.deep-robin-3429.chatgpt.site">Live application</a>
   ·
   <a href="https://github.com/weifanwu/polaris/issues">Report an issue</a>
+  ·
+  <a href="#quick-start">Run locally</a>
 </p>
 
 <p align="center">
-  <img src="./public/og.png" alt="北极星 Polaris 实时数据驾驶舱" width="100%" />
+  <img src="./public/og.png" alt="Polaris live data dashboard" width="100%" />
 </p>
 
-> [!NOTE]
-> 当前版本是可运行、可部署的产品 POC。线上 Demo 可能要求使用 ChatGPT 登录；数据来自实时 Web Search，不应替代专业金融、法律或业务数据源。
+Polaris turns a data question into a reusable dashboard widget. It resolves follow-up answers, searches current public sources, validates the resulting dataset, and renders it as a chart, table, or metric card. Every generated widget keeps its source links and can be refreshed independently.
 
-## 目录
+The repository is publicly available for personal, educational, research, and other noncommercial use under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
 
-- [产品简介](#产品简介)
-- [核心能力](#核心能力)
-- [工作原理](#工作原理)
-- [技术栈](#技术栈)
-- [快速开始](#快速开始)
-- [环境变量](#环境变量)
-- [常用命令](#常用命令)
+## Table of contents
+
+- [Why Polaris](#why-polaris)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Cost-aware model routing](#cost-aware-model-routing)
+- [Data integrity](#data-integrity)
+- [Technology](#technology)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Commands](#commands)
 - [API](#api)
-- [项目结构](#项目结构)
-- [数据、安全与隐私](#数据安全与隐私)
-- [部署](#部署)
-- [当前边界](#当前边界)
-- [路线图](#路线图)
-- [贡献](#贡献)
-- [许可证](#许可证)
+- [Project structure](#project-structure)
+- [Security and privacy](#security-and-privacy)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [License](#license)
 
-## 产品简介
+## Why Polaris
 
-Polaris 是一个自然语言驱动的个人实时数据驾驶舱。用户可以直接描述想观察的数据，例如：
+Most AI data answers disappear into chat history. Polaris turns each successful answer into a persistent, interactive object on a personal dashboard.
 
-- “显示微软最近 7 个交易日的收盘价。”
-- “比较多伦多和渥太华最近 24 个月的平均房价环比，使用两条不同颜色的折线。”
-- “显示加拿大央行最近一年的政策利率变化。”
+Ask questions such as:
 
-Polaris 会先理解需求和多轮澄清信息，再通过 OpenAI Responses API 的 Web Search 获取当前数据，生成经过校验的统一 `WidgetSpec`，最后在浏览器中渲染成折线图、柱状图、表格或指标卡。
+- “Show Microsoft’s closing price for the last seven completed trading days.”
+- “Compare the monthly CPI inflation rate in Canada and the United States for the last 12 complete months.”
+- “Compare the monthly change in MLS® HPI benchmark prices across GTA and Ottawa, leaving unverifiable months blank.”
+- “Show the Bank of Canada policy-rate changes over the last year.”
 
-产品目标不是让模型自由生成一段答案，而是把一次数据查询转化成一个可以继续使用的 Dashboard 组件。
+Polaris preserves the request, retrieved values, source links, visualization choice, and refresh state in one portable `WidgetSpec`.
 
-## 核心能力
+## Features
 
-### 实时数据 Agent
+### Live research agent
 
-- 使用 OpenAI Responses API 与托管 Web Search 检索公开网页。
-- 支持模型主动搜索、打开数据页面并返回可点击来源。
-- 根据查询复杂度分配 3 或 6 次搜索预算，不再自动执行一次完整的高成本重试。
-- 普通查询使用低成本模型；长时间序列和多来源比较才进入高能力研究路径。
-- 无法验证数据时明确拒绝生成，而不是填补或猜测缺失值。
-- 默认允许输出可核验的部分数据，并明确标出实际覆盖范围与缺口。
+- Uses the OpenAI Responses API with hosted Web Search.
+- Prefers official, primary, and directly attributable sources.
+- Searches with canonical English names, tickers, and identifiers where useful.
+- Splits fragmented research by source, entity, or date range.
+- Supports derived calculations such as month-over-month change when the underlying values are verifiable.
+- Stops within an explicit search budget instead of retrying indefinitely.
 
-### 多轮澄清与会话记忆
+### Multi-turn clarification and memory
 
-- 在搜索前独立判断需求是否已经完整。
-- 自动合并最近对话中的地区、指标、周期、环比/同比和图表类型。
-- 只追问仍会实质影响数据集的关键条件。
-- 用户表示“其他都可以”时选择合理默认值，并在组件中说明。
-- Agent 将已确认条件压缩成最多 500 字符的结构化会话状态；仅在旧会话迁移时发送最近 4 条短消息。
-- 最近 20 条消息仍保存在当前浏览器用于界面展示，但不会在每次请求中重复发送。
-- 成功生成后会保存一条完整、可独立重放的问题，确保 Refresh 不依赖聊天历史。
+- Asks one focused follow-up only when a missing choice materially changes the dataset.
+- Remembers confirmed metrics, regions, periods, comparison groups, calculation methods, and chart preferences.
+- Replaces the active context when the user starts a new, unrelated request.
+- Compresses confirmed requirements into a bounded 500-character conversation state.
+- Keeps up to 20 chat messages locally for presentation without resending the full transcript on every request.
 
-### 结构化数据与可视化
+### Structured data and visualizations
 
-- 支持 `line_chart`、`bar_chart`、`table` 和 `metric`。
-- 使用 Structured Outputs 将模型输出约束为固定 JSON Schema。
-- 使用 Zod 再次校验列、行、数据类型、来源和图表要求。
-- 每个真实组件最多展示 5 个可点击来源。
-- 单个组件最多包含 6 列、30 行数据。
+- Supports `line_chart`, `bar_chart`, `table`, and `metric` widgets.
+- Constrains model output with Structured Outputs and a fixed JSON Schema.
+- Validates columns, rows, types, sources, and chart requirements with Zod.
+- Supports up to six columns, 30 rows, and five clickable sources per widget.
+- Renders unavailable numeric values as chart gaps rather than silently converting them to zero.
 
-### 可组合 Dashboard
+### Flexible dashboard
 
-- 拖拽排列组件。
-- 从四边和四角共 8 个方向调整大小。
-- 全屏专注查看，支持 `Esc` 退出。
-- 删除、刷新或清空 Dashboard。
-- Refresh 失败时保留旧数据，不用失败响应覆盖已有结果。
-- 同一组件更新后 5 分钟内禁止重复 Refresh，避免无意义的重复费用。
-- Dashboard、布局和聊天记录自动保存到 `localStorage`。
+- Drag widgets anywhere on the responsive grid.
+- Resize from all four edges and four corners.
+- Open any widget in a full-screen focus view; press `Esc` to exit.
+- Refresh or remove widgets independently.
+- Preserve existing data when a refresh fails.
+- Enforce a five-minute refresh cooldown to prevent accidental duplicate spend.
+- Persist widgets, layouts, chat history, and compact conversation state in browser `localStorage`.
 
-### Chat Panel
+### Usage visibility
 
-- 独立滚动并自动定位到最新消息。
-- 支持多轮追问和 Widget 快速定位。
-- 可单独清空对话，不影响已经创建的 Dashboard 组件。
+Every agent response reports:
 
-## 工作原理
+- input tokens;
+- cached input tokens;
+- model calls; and
+- Web Search calls.
+
+This makes prompt growth, cache behavior, and expensive research paths visible during normal use.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    U["用户问题与紧凑会话状态"] --> I["Luna Intent Resolver"]
-    I -->|"仍有关键歧义"| Q["Follow-up Question"]
-    I -->|"需求完整"| R["Resolved Query"]
-    R --> O["Terra / Sol Model Router"]
-    O --> W["Hosted Web Search"]
-    W --> S["Structured Outputs"]
-    S --> Z["Zod Validation"]
-    Z --> V{"visualization"}
-    V --> L["Line Chart"]
-    V --> B["Bar Chart"]
-    V --> T["Table"]
+    U["Question + compact state"] --> I["Luna intent resolver"]
+    I -->|"missing required choice"| Q["Focused follow-up"]
+    I -->|"request is complete"| R{"Research router"}
+    R -->|"simple lookup"| T["Terra"]
+    R -->|"complex research"| S["Sol"]
+    T --> W["Hosted Web Search"]
+    S --> W
+    W --> O["Structured Outputs"]
+    O --> Z["Zod validation"]
+    Z --> V{"Widget type"}
+    V --> L["Line chart"]
+    V --> B["Bar chart"]
+    V --> A["Table"]
     V --> M["Metric"]
-    L --> D["Dashboard + localStorage"]
+    L --> D["Dashboard"]
     B --> D
-    T --> D
+    A --> D
     M --> D
 ```
 
-完整请求链路：
+The request lifecycle is deliberately bounded:
 
-1. 浏览器向 `POST /api/generate-widget` 发送当前问题和最多 500 字符的紧凑会话状态；旧会话没有状态时才附带 4 条短历史。
-2. 低成本 Intent Resolver 合并多轮约束，更新紧凑状态；条件不足时只返回一个澄清问题。
-3. 简单需求交给 Terra，复杂多来源需求交给 Sol，并按固定预算调用 `web_search`。
-4. 模型按照 `WidgetSpec` Schema 返回标题、列、行、图表类型和摘要。
-5. 服务端提取 Web Search 来源并执行 Zod 校验；缺失数值保留为空值，在图中显示为断点而不是 `0`。
-6. 前端根据 `visualization` 字段选择 Recharts 图表、表格或指标卡。
-7. Widget、响应式布局、紧凑会话状态和每次请求的 Token 用量保存在当前浏览器。
+1. The client sends the current question and a compact conversation state.
+2. A lightweight intent model resolves follow-up answers into one standalone query.
+3. Simple lookups use the fast research model; multi-source and long time-series requests use the advanced model.
+4. The selected model searches within a fixed tool-call budget and returns a structured result.
+5. The server attaches retrieved source URLs and validates the complete widget contract.
+6. The browser renders and stores the widget locally.
 
-## 技术栈
+## Cost-aware model routing
 
-| 层级 | 技术 |
+Polaris assigns each stage to the least expensive model tier that fits its job:
+
+| Stage | Default model | Reasoning | Search budget |
+| --- | --- | --- | --- |
+| Clarification and context compression | `gpt-5.6-luna` | None | No search |
+| Direct and short data lookups | `gpt-5.6-terra` | Low | Up to 3 calls |
+| Multi-source comparisons and long series | `gpt-5.6` | Low | Up to 6 calls |
+
+Additional safeguards include:
+
+- a stable prompt prefix and `prompt_cache_key` per route;
+- no automatic full-query retry after an unsuccessful research pass;
+- a 500-character conversation-state limit;
+- at most four short fallback messages during migration from older local state;
+- lower Web Search context for direct lookups; and
+- a refresh cooldown for recently generated widgets.
+
+Model names and budgets are configurable without changing application code.
+
+## Data integrity
+
+Polaris follows a strict evidence contract:
+
+- Retrieved values are never replaced with remembered, estimated, or interpolated numbers.
+- Arithmetic may be calculated only from retrieved source values.
+- A month-over-month calculation requires both adjacent verified months.
+- Partial datasets are allowed by default and must disclose their actual coverage.
+- Comparison charts may contain gaps when one series is unavailable for a given date.
+- A widget is rejected when it has no trustworthy source or cannot be rendered honestly.
+
+Web Search is inherently nondeterministic, and third-party pages can change or become unavailable. Verify financial, medical, legal, and other high-stakes information against the linked original source.
+
+## Technology
+
+| Layer | Technology |
 | --- | --- |
-| UI | React 19、TypeScript、Tailwind CSS |
-| App runtime | Vinext、Vite、React Server Components |
-| AI | OpenAI Node SDK、Responses API、Web Search、Structured Outputs |
+| Interface | React 19, TypeScript, Tailwind CSS |
+| Application runtime | Vinext, Vite, React Server Components |
+| AI | OpenAI Node SDK, Responses API, Web Search, Structured Outputs |
 | Validation | Zod 4 |
 | Charts | Recharts 3 |
 | Dashboard layout | React Grid Layout 2 |
 | Icons | Lucide React |
-| Hosting | OpenAI Sites / Cloudflare Workers-compatible build |
 | Persistence | Browser `localStorage` |
+| Hosting | OpenAI Sites with a Cloudflare Workers-compatible build |
 
-## 快速开始
+## Quick start
 
-### 前置要求
+### Requirements
 
-- Node.js `22.13.0` 或更高版本
+- Node.js 22.13.0 or newer
 - npm
-- 一个可用的 OpenAI API Key
+- An OpenAI API key
 
-### 安装
+### Installation
 
 ```bash
 git clone https://github.com/weifanwu/polaris.git
@@ -155,7 +204,7 @@ npm ci
 cp .env.example .env.local
 ```
 
-编辑 `.env.local`：
+Add your API key to `.env.local`:
 
 ```dotenv
 OPENAI_API_KEY=your_openai_api_key
@@ -164,40 +213,40 @@ OPENAI_FAST_MODEL=gpt-5.6-terra
 OPENAI_INTENT_MODEL=gpt-5.6-luna
 ```
 
-启动开发服务器：
+Start the development server:
 
 ```bash
 npm run dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000)。
+Open [http://localhost:3000](http://localhost:3000).
 
-如果没有配置 API Key，界面会显示 `Missing key`。真实搜索会被禁用，但仍可点击 `Load demo` 检查 Dashboard、图表、拖拽、缩放和全屏交互。
+Without an API key, live research is disabled, but the built-in demo remains available for testing the dashboard, visualizations, layout, resize, and focus interactions.
 
-## 环境变量
+## Configuration
 
-| 变量 | 必需 | 默认值 | 说明 |
+| Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | 是 | — | 仅由服务端 API Route 读取的 OpenAI API Key |
-| `OPENAI_MODEL` | 否 | `gpt-5.6` | 复杂、多来源研究使用的高能力模型 |
-| `OPENAI_FAST_MODEL` | 否 | `gpt-5.6-terra` | 普通数据查询使用的低成本模型 |
-| `OPENAI_INTENT_MODEL` | 否 | `gpt-5.6-luna` | 澄清、需求合并和查询分类使用的轻量模型 |
+| `OPENAI_API_KEY` | Yes | — | Server-side OpenAI API credential |
+| `OPENAI_MODEL` | No | `gpt-5.6` | Advanced model for complex, multi-source research |
+| `OPENAI_FAST_MODEL` | No | `gpt-5.6-terra` | Lower-cost model for direct data lookups |
+| `OPENAI_INTENT_MODEL` | No | `gpt-5.6-luna` | Lightweight model for clarification and context resolution |
 
-不要提交 `.env.local` 或任何真实密钥。仓库已经通过 `.gitignore` 排除所有 `.env*` 文件，仅保留 `.env.example`。
+Never commit `.env.local` or a real API key. The repository excludes `.env*` files except `.env.example`.
 
-## 常用命令
+## Commands
 
-| 命令 | 说明 |
+| Command | Description |
 | --- | --- |
-| `npm run dev` | 启动本地开发服务器 |
-| `npm run build` | 生成生产构建 |
-| `npm run start` | 启动生产构建 |
-| `npm run lint` | 执行 ESLint |
-| `npm run typecheck` | 执行 TypeScript 类型检查 |
-| `npm run test` | 运行 Schema 测试 |
-| `npm run test:schema` | 直接运行 WidgetSpec Schema 测试 |
+| `npm run dev` | Start the local development server |
+| `npm run build` | Create a production build |
+| `npm run start` | Run the production build |
+| `npm run lint` | Run ESLint |
+| `npm run typecheck` | Run the TypeScript compiler without emitting files |
+| `npm run test` | Run schema and agent-policy tests |
+| `npm run test:schema` | Run the test file directly |
 
-提交变更前建议运行：
+Before submitting a change:
 
 ```bash
 npm run lint
@@ -210,9 +259,7 @@ npm run build
 
 ### `GET /api/health`
 
-返回服务端是否已配置 OpenAI API Key，以及当前模型名称。
-
-示例：
+Reports whether the server has an API key and identifies the primary research model.
 
 ```json
 {
@@ -223,58 +270,68 @@ npm run build
 
 ### `POST /api/generate-widget`
 
-请求：
+Request:
 
 ```json
 {
-  "query": "显示微软最近 7 个交易日的收盘价",
-  "conversationContext": "微软股票收盘价，最近7个完整交易日，美元",
+  "query": "Compare Canada and US CPI inflation for the last 12 complete months",
+  "conversationContext": "Monthly CPI year-over-year comparison; Canada and United States; official sources; line chart",
   "history": [],
   "skipClarification": false
 }
 ```
 
-成功响应：
+Successful response:
 
 ```json
 {
   "status": "success",
-  "message": "已生成最近 7 个交易日的收盘价。",
+  "message": "Created a source-backed monthly CPI comparison.",
   "widget": {
     "id": "generated-uuid",
-    "title": "微软最近 7 个交易日收盘价",
-    "subtitle": "NASDAQ: MSFT · USD",
+    "title": "Canada vs. United States CPI Inflation",
+    "subtitle": "Latest 12 complete months · year-over-year",
     "visualization": "line_chart",
     "columns": [
       {
-        "key": "date",
-        "label": "交易日",
+        "key": "month",
+        "label": "Month",
         "dataType": "date",
         "unit": null
       },
       {
-        "key": "close",
-        "label": "收盘价",
+        "key": "canada",
+        "label": "Canada",
         "dataType": "number",
-        "unit": "USD"
+        "unit": "%"
+      },
+      {
+        "key": "united_states",
+        "label": "United States",
+        "dataType": "number",
+        "unit": "%"
       }
     ],
     "rows": [
       {
-        "cells": ["2026-08-06", "499.86"]
+        "cells": ["2026-06", "2.1", "2.4"]
       }
     ],
-    "summary": "最近完整交易日的收盘价。",
-    "originalQuery": "显示微软最近 7 个完整交易日的收盘价，单位为美元。",
+    "summary": "Official monthly CPI year-over-year rates aligned by release month.",
+    "originalQuery": "Compare Canada and US CPI inflation for the last 12 complete months using official sources.",
     "sources": [
       {
-        "title": "Nasdaq",
-        "url": "https://www.nasdaq.com/market-activity/stocks/msft/historical"
+        "title": "Statistics Canada",
+        "url": "https://www.statcan.gc.ca/"
+      },
+      {
+        "title": "U.S. Bureau of Labor Statistics",
+        "url": "https://www.bls.gov/"
       }
     ],
     "generatedAt": "2026-08-07T00:00:00.000Z"
   },
-  "conversationContext": "微软股票最近7个完整交易日的收盘价，美元，折线图",
+  "conversationContext": "Monthly CPI year-over-year comparison; Canada and United States; official sources; line chart",
   "usage": {
     "inputTokens": 3240,
     "cachedInputTokens": 1100,
@@ -285,119 +342,91 @@ npm run build
 }
 ```
 
-当需求仍有关键歧义时，接口返回：
+Clarification response:
 
 ```json
 {
   "status": "needs_clarification",
-  "message": "请选择环比还是同比。",
-  "widget": null
+  "message": "Should the comparison use month-over-month or year-over-year change?",
+  "widget": null,
+  "conversationContext": "Compare monthly housing prices in GTA and Ottawa"
 }
 ```
 
-当可靠来源不足时，接口返回 `cannot_answer`，不会创建 Widget。
+If the available evidence cannot support a useful widget, the endpoint returns `cannot_answer` without inventing rows.
 
-## 项目结构
+## Project structure
 
 ```text
 polaris/
 ├── app/
 │   ├── api/
-│   │   ├── generate-widget/   # 意图解析、Web Search、Structured Outputs
-│   │   └── health/            # API 配置状态
-│   ├── globals.css            # 全局视觉与响应式布局
-│   ├── layout.tsx             # Metadata 与根布局
-│   └── page.tsx               # 应用入口
+│   │   ├── generate-widget/   # Intent resolution, research, and structured output
+│   │   └── health/            # Runtime configuration status
+│   ├── globals.css            # Global visual system and responsive layout
+│   ├── layout.tsx             # Metadata and root layout
+│   └── page.tsx               # Application entry point
 ├── components/
-│   ├── widgets/               # 折线图、柱状图、表格、指标卡
-│   ├── app-shell.tsx          # Dashboard 状态与请求编排
-│   ├── chat-panel.tsx         # 多轮对话界面
-│   ├── dashboard-grid.tsx     # 拖拽、缩放与全屏模式
-│   └── widget-card.tsx        # Widget 容器、来源与操作
+│   ├── widgets/               # Line, bar, table, and metric renderers
+│   ├── app-shell.tsx          # Dashboard state and request orchestration
+│   ├── chat-panel.tsx         # Multi-turn agent interface
+│   ├── dashboard-grid.tsx     # Drag, resize, and focus interactions
+│   └── widget-card.tsx        # Widget frame, sources, and actions
 ├── lib/
-│   ├── agent-policy.ts        # 上下文边界、研究路由与部分数据策略
-│   ├── openai.ts              # 服务端 OpenAI Client
-│   ├── storage.ts             # 浏览器持久化
-│   └── widget-schema.ts       # Zod Schema 与输出契约
+│   ├── agent-policy.ts        # Context limits and research routing policy
+│   ├── openai.ts              # Server-side OpenAI client and model roles
+│   ├── storage.ts             # Browser persistence
+│   └── widget-schema.ts       # Zod schemas and API contracts
 ├── public/
-│   └── og.png                 # 社交分享预览图
+│   └── og.png                 # Social preview image
 ├── scripts/
-│   └── test-schema.ts         # Schema 测试
-├── types/                     # 前端共享类型
-├── worker/                    # Cloudflare Worker 入口
-└── .openai/hosting.json       # OpenAI Sites 项目配置
+│   └── test-schema.ts         # Schema and agent-policy tests
+├── types/                     # Shared frontend types
+├── worker/                    # Cloudflare Worker entry point
+└── .openai/hosting.json       # OpenAI Sites project configuration
 ```
 
-## 数据、安全与隐私
+## Security and privacy
 
-- `OPENAI_API_KEY` 只在服务端读取，不会发送到浏览器。
-- Dashboard、布局和聊天记录存储在当前浏览器的 `localStorage`。
-- 应用本身没有数据库，也不会在自己的后端建立用户档案。
-- 用户问题和必要对话上下文会发送到 OpenAI API，并受对应项目的数据与保留策略约束。
-- Web Search 来源来自第三方公开网站；点击来源会离开 Polaris。
-- 应用会展示来源，但不保证第三方数据永久可用或没有错误。
-- 对金融、医疗、法律或其他高风险数据，应回到原始来源进行确认。
+- `OPENAI_API_KEY` is read only by the server route and is never sent to the browser.
+- Widgets, layouts, chat messages, and compact conversation state remain in the current browser’s `localStorage`.
+- Polaris does not maintain its own user database or server-side user profile.
+- The current question and necessary compact context are sent to the OpenAI API.
+- Source links can lead to third-party websites governed by their own policies.
+- API keys must be rotated immediately if they are exposed in logs, screenshots, commits, or chat transcripts.
 
-## 部署
+## Deployment
 
-项目已包含 `.openai/hosting.json`，并使用 Vinext 生成 Cloudflare Workers-compatible 构建，可通过 OpenAI Sites 发布。
+Polaris includes an OpenAI Sites configuration and produces a Cloudflare Workers-compatible Vinext build.
 
-生产环境需要以托管 Secret 配置：
+Production secrets should be configured in the hosting environment:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `OPENAI_FAST_MODEL`
 - `OPENAI_INTENT_MODEL`
 
-不要把生产密钥写进仓库、构建产物、Git Remote URL 或 `.openai/hosting.json`。
+Do not place production credentials in the repository, build artifacts, Git remote URLs, or `.openai/hosting.json`.
 
-当前部署地址：
+The current production deployment is available at [polaris-weifanwu.deep-robin-3429.chatgpt.site](https://polaris-weifanwu.deep-robin-3429.chatgpt.site).
 
-- [https://polaris-weifanwu.deep-robin-3429.chatgpt.site](https://polaris-weifanwu.deep-robin-3429.chatgpt.site)
+## Contributing
 
-## 当前边界
+Bug reports, reproducible data-quality cases, documentation improvements, and focused pull requests are welcome.
 
-Polaris 当前仍是 POC，以下能力尚未实现：
+1. Open an issue describing the problem or proposed change.
+2. Create a branch from `main`.
+3. Keep the change focused and never include credentials or local environment files.
+4. Add tests for schema, routing, or data-contract changes.
+5. Run the complete validation suite.
+6. Submit a pull request with a concise description and verification notes.
 
-- 专用金融、房地产或宏观经济数据 Connector
-- 服务端数据库和跨设备同步
-- 用户账号与应用内权限系统
-- 多 Dashboard、分享和协作
-- 定时刷新、通知和后台任务
-- 跨设备查询缓存、金额预算和完整可观测性
-- 面向大规模数据集的分页或文件导出
+Please use [GitHub Issues](https://github.com/weifanwu/polaris/issues) for support and feature proposals.
 
-此外，Web Search 具有非确定性。网页不可访问、来源缺少完整历史数据或问题跨度过大时，查询可能变慢或返回 `cannot_answer`。
+## License
 
-## 路线图
+Polaris is licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
 
-候选方向按优先级包括：
+You may use, study, modify, and redistribute the software for permitted noncommercial purposes. Commercial use is not permitted under this license. To discuss separate commercial licensing, open a [GitHub issue](https://github.com/weifanwu/polaris/issues).
 
-1. 为股票、利率和房地产数据增加结构化数据 Connector。
-2. 在现有 Token 用量显示和搜索预算基础上，增加跨会话缓存与金额级成本上限。
-3. 增加服务端 Dashboard、跨设备同步和身份认证。
-4. 支持定时刷新、提醒和异常变化通知。
-5. 支持多个 Dashboard、分享链接和协作权限。
-6. 建立多轮澄清与数据准确性的自动化 Eval。
-
-## 贡献
-
-欢迎通过 [Issues](https://github.com/weifanwu/polaris/issues) 报告问题或提出功能建议。
-
-提交 Pull Request 前：
-
-1. 从 `main` 创建功能分支。
-2. 保持变更聚焦，并避免提交任何密钥或本地环境文件。
-3. 为 Schema 或数据契约变更补充测试。
-4. 运行完整检查：
-
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
-```
-
-## 许可证
-
-当前仓库尚未包含 `LICENSE` 文件，因此没有授予开源使用许可。在正式开放复用或分发前，应先选择并添加合适的许可证。
+Required Notice: Copyright 2026 Weifan Wu.
