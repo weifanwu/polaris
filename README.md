@@ -43,7 +43,7 @@ Polaris treats data acquisition, identity resolution, transformation, analysis, 
 - Build line charts, bar charts, metric cards, and scrollable tables from natural-language questions.
 - Read user-supplied CSV, TSV, JSON, XLSX, TXT, pasted tables, and PDFs.
 - Follow direct links to downloadable CSV, XLS, XLSX, TSV, JSON, TXT, and PDF files.
-- Route common requests directly to official structured data with no model call and no Web Search.
+- Route common data acquisition directly to official structured sources with no retrieval-model call and no Web Search; the bounded Insight Engine remains a separate, observable analysis pass.
 - Preserve follow-up decisions through compact conversation memory, including metric, geography, frequency, units, and previously selected definitions.
 - Create, rename, switch, and delete focused dashboards; every dashboard owns its widgets, layout, conversation history, and agent context.
 - Research fragmented comparison series independently, align dates deterministically, and preserve missing observations as gaps.

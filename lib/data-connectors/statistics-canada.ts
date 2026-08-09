@@ -682,8 +682,8 @@ export const statisticsCanadaConnector: DataConnector = {
 
     return {
       message: chinese
-        ? `已通过加拿大统计局 WDS 官方接口校验 ${availablePoints}/${numericCells.length} 个数据点；本次不使用模型或网页搜索。`
-        : `Validated ${availablePoints}/${numericCells.length} observations through Statistics Canada WDS with no model or Web Search call.`,
+        ? `已通过加拿大统计局 WDS 官方接口校验 ${availablePoints}/${numericCells.length} 个数据点；数据检索阶段未使用模型或网页搜索。`
+        : `Validated ${availablePoints}/${numericCells.length} observations through Statistics Canada WDS; data retrieval used no model or Web Search.`,
       widget: {
         title: `${titleMetric}${calculationLabel ? ` · ${calculationLabel}` : ""}`,
         subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · ${metric.tableTitle} (${metric.tableId.slice(0, 2)}-${metric.tableId.slice(2, 4)}-${metric.tableId.slice(4)}-01)`,

@@ -241,8 +241,8 @@ export const worldBankIndicatorsConnector: DataConnector = {
 
     return {
       message: chinese
-        ? `已通过${sourceName}校验 ${availablePoints}/${numericCells.length} 个年度数据点；本次不使用模型或网页搜索。`
-        : `Validated ${availablePoints}/${numericCells.length} annual observations through the ${sourceName} with no model or Web Search call.`,
+        ? `已通过${sourceName}校验 ${availablePoints}/${numericCells.length} 个年度数据点；数据检索阶段未使用模型或网页搜索。`
+        : `Validated ${availablePoints}/${numericCells.length} annual observations through the ${sourceName}; data retrieval used no model or Web Search.`,
       widget: {
         title: `${chinese ? indicator.zh : indicator.label}${calculationLabel}`,
         subtitle: `${rows[0].year} – ${rows.at(-1)!.year} · ${indicator.id}${metadata.lastupdated ? ` · updated ${metadata.lastupdated}` : ""}`,

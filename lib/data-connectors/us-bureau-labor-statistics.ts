@@ -219,15 +219,15 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
     return {
       message: deliveredViaSnapshot
         ? (chinese
-            ? `BLS 与 FRED 实时接口暂时不可用；已使用 ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)} 核验并随版本保存的 BLS/FRED 官方快照，返回 ${availablePoints}/${rows.length} 个数据点；未使用模型或网页搜索。`
-            : `The live BLS and FRED endpoints were unavailable; returned ${availablePoints}/${rows.length} observations from the BLS/FRED official snapshot verified on ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)}, with no model or Web Search call.`)
+            ? `BLS 与 FRED 实时接口暂时不可用；已使用 ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)} 核验并随版本保存的 BLS/FRED 官方快照，返回 ${availablePoints}/${rows.length} 个数据点；数据检索阶段未使用模型或网页搜索。`
+            : `The live BLS and FRED endpoints were unavailable; returned ${availablePoints}/${rows.length} observations from the BLS/FRED official snapshot verified on ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)}; data retrieval used no model or Web Search.`)
         : deliveredViaFred
         ? (chinese
-            ? `BLS 官方 API 暂时不可用；已通过 FRED 的 BLS 镜像数据校验 ${availablePoints}/${rows.length} 个数据点，未使用模型或网页搜索。`
-            : `The BLS API was temporarily unavailable; validated ${availablePoints}/${rows.length} observations through FRED's BLS-sourced series with no model or Web Search call.`)
+            ? `BLS 官方 API 暂时不可用；已通过 FRED 的 BLS 镜像数据校验 ${availablePoints}/${rows.length} 个数据点；数据检索阶段未使用模型或网页搜索。`
+            : `The BLS API was temporarily unavailable; validated ${availablePoints}/${rows.length} observations through FRED's BLS-sourced series; data retrieval used no model or Web Search.`)
         : (chinese
-            ? `已通过美国劳工统计局公开 API 校验 ${availablePoints}/${rows.length} 个数据点；本次不使用模型或网页搜索。`
-            : `Validated ${availablePoints}/${rows.length} observations through the U.S. BLS Public Data API with no model or Web Search call.`),
+            ? `已通过美国劳工统计局公开 API 校验 ${availablePoints}/${rows.length} 个数据点；数据检索阶段未使用模型或网页搜索。`
+            : `Validated ${availablePoints}/${rows.length} observations through the U.S. BLS Public Data API; data retrieval used no model or Web Search.`),
       widget: {
         title: `${label}${calculation === "level" ? "" : calculation === "mom" ? " · MoM" : " · YoY"}`,
         subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · ${series.id} · seasonally adjusted${deliveredViaSnapshot ? ` · verified snapshot ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)}` : deliveredViaFred ? " · BLS data via FRED" : ""}`,

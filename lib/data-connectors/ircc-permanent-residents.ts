@@ -120,8 +120,8 @@ export const irccPermanentResidentsConnector: DataConnector = {
 
     return {
       message: chinese
-        ? `已直接解析 IRCC 官方 XLSX 的加拿大全国 Total 行，得到 ${availablePoints}/${requestedPoints} 个月度观测；本次不使用模型或网页搜索。`
-        : `Parsed Canada's national Total row directly from the official IRCC XLSX and returned ${availablePoints}/${requestedPoints} monthly observations without a model or Web Search.`,
+        ? `已直接解析 IRCC 官方 XLSX 的加拿大全国 Total 行，得到 ${availablePoints}/${requestedPoints} 个月度观测；数据检索阶段未使用模型或网页搜索。`
+        : `Parsed Canada's national Total row directly from the official IRCC XLSX and returned ${availablePoints}/${requestedPoints} monthly observations; data retrieval used no model or Web Search.`,
       widget: {
         title: chinese ? "加拿大新增永久居民（月度）" : "New permanent residents in Canada (monthly)",
         subtitle: `${rows[0].period} – ${rows.at(-1)!.period} · ${chinese ? "全国永久居民入境人数" : "national permanent-resident admissions"}`,
