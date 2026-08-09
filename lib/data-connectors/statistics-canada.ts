@@ -1,5 +1,6 @@
 import type { DataConnector } from "./types";
 import { detectMaterialQualifiers } from "./query-capabilities";
+import { fetchWithTransientRetry } from "./http";
 import {
   isChineseQuery,
   requestedCalculation,
@@ -398,15 +399,14 @@ function periodLabel(date: string, frequency: Frequency) {
 }
 
 async function fetchVectors(vectors: string[], latestN: number) {
-  const response = await fetch(WDS_URL, {
+  const response = await fetchWithTransientRetry(WDS_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(vectors.map((vector) => ({
       vectorId: Number(vector.replace(/^v/i, "")),
       latestN,
     }))),
-    signal: AbortSignal.timeout(15_000),
-  });
+  }, { timeoutMs: 15_000 });
   if (!response.ok) throw new Error(`Statistics Canada WDS returned ${response.status}`);
   const payload = await response.json() as WdsItem[];
   if (!Array.isArray(payload)) throw new Error("Statistics Canada WDS returned an invalid payload");

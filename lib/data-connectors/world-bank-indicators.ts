@@ -1,5 +1,6 @@
 import type { DataConnector } from "./types";
 import { hasSubnationalGeography } from "./query-capabilities";
+import { fetchWithTransientRetry } from "./http";
 import {
   isChineseQuery,
   requestedAnnualPeriods,
@@ -107,7 +108,7 @@ export const worldBankIndicatorsConnector: DataConnector = {
     url.searchParams.set("date", `${startYear}:${currentYear}`);
     url.searchParams.set("per_page", String(Math.max(100, periods * countries.length + 20)));
 
-    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const response = await fetchWithTransientRetry(url, {}, { timeoutMs: 15_000 });
     if (!response.ok) throw new Error(`World Bank Indicators API returned ${response.status}`);
     const payload = await response.json() as [ApiMetadata, ApiPoint[]] | { message?: unknown };
     if (!Array.isArray(payload) || !Array.isArray(payload[1])) throw new Error("World Bank Indicators API returned an invalid payload");

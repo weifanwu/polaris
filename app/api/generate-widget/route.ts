@@ -29,7 +29,9 @@ import {
   intentResolutionSchema,
   modelWidgetResultSchema,
   widgetSpecSchema,
+  type AgentTrace,
   type GenerateWidgetResult,
+  type ModelWidgetResult,
   type RequestUsage,
 } from "@/lib/widget-schema";
 
@@ -121,6 +123,8 @@ type SeriesResearch = {
   plan: SeriesPlan;
   parsed: z.infer<typeof seriesResearchSchema> | null;
   sources: SourceCandidate[];
+  searches: string[];
+  durationMs: number;
   usage: RequestUsage;
 };
 
@@ -168,6 +172,37 @@ function collectSources(response: ParsedResponse) {
   }
 
   return Array.from(found.values()).slice(0, 5);
+}
+
+function traceEvent(
+  kind: AgentTrace["events"][number]["kind"],
+  title: string,
+  detail: string,
+  status: AgentTrace["events"][number]["status"] = "complete",
+  durationMs?: number,
+): AgentTrace["events"][number] {
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    status,
+    title: title.slice(0, 120),
+    detail: detail.slice(0, 500),
+    ...(durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(durationMs)) }),
+  };
+}
+
+function collectSearchQueries(response: ParsedResponse) {
+  return response.output.flatMap((item) => {
+    if (item.type !== "web_search_call") return [];
+    const action = item.action as unknown as { query?: unknown; queries?: unknown };
+    if (typeof action.query === "string" && action.query.trim()) return [action.query.trim().slice(0, 300)];
+    if (Array.isArray(action.queries)) {
+      return action.queries.flatMap((query) => typeof query === "string" && query.trim()
+        ? [query.trim().slice(0, 300)]
+        : []);
+    }
+    return ["Hosted Web Search call completed"];
+  });
 }
 
 function readUsage(response: ParsedResponse): RequestUsage {
@@ -256,10 +291,58 @@ function buildUserDataQuality(
   };
 }
 
+function normalizeModelWidget(
+  candidate: NonNullable<ModelWidgetResult["widget"]>,
+  query: string,
+  sources: SourceCandidate[],
+) {
+  const usedKeys = new Set<string>();
+  const columns = candidate.columns.slice(0, 6).flatMap((column, index) => {
+    const label = column.label.trim().slice(0, 80) || `Column ${index + 1}`;
+    const baseKey = column.key.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 68) || `column_${index + 1}`;
+    let key = baseKey;
+    let suffix = 2;
+    while (usedKeys.has(key)) key = `${baseKey.slice(0, 72)}_${suffix++}`;
+    usedKeys.add(key);
+    return [{
+      key,
+      label,
+      dataType: column.dataType,
+      unit: column.unit?.trim().slice(0, 40) || null,
+    }];
+  });
+  if (!columns.length) return null;
+
+  const rows = candidate.rows.slice(0, 120).flatMap((row) => {
+    const cells = columns.map((_, index) => String(row.cells[index] ?? "").trim().slice(0, 300));
+    return cells.some(Boolean) ? [{ cells }] : [];
+  });
+  if (!rows.length) return null;
+
+  const hasNumericColumn = columns.some((column) => column.dataType === "number");
+  const visualization = candidate.visualization === "table" || hasNumericColumn
+    ? candidate.visualization
+    : "table";
+  const normalized = widgetSpecSchema.safeParse({
+    id: crypto.randomUUID(),
+    title: candidate.title.trim().slice(0, 120) || "Polaris analysis",
+    subtitle: candidate.subtitle.trim().slice(0, 220),
+    visualization,
+    columns,
+    rows,
+    summary: candidate.summary.trim().slice(0, 500),
+    originalQuery: query,
+    sources: sources.slice(0, 5),
+    generatedAt: new Date().toISOString(),
+  });
+  return normalized.success ? normalized.data : null;
+}
+
 function connectorResponse(
   connectorResult: Awaited<ReturnType<typeof resolveWithOfficialConnector>>,
   query: string,
   usage: RequestUsage,
+  trace?: AgentTrace,
 ) {
   if (!connectorResult) return null;
   const widget = widgetSpecSchema.parse({
@@ -274,23 +357,36 @@ function connectorResponse(
     widget,
     conversationContext: query,
     usage,
+    trace: trace ?? {
+      mode: "connector",
+      summary: "Matched an exact deterministic connector; no web search was needed.",
+      events: [
+        traceEvent("route", "Official connector matched", `Resolved the request with ${connectorResult.widget.dataQuality?.sourceName || connectorResult.widget.sources[0]?.title || "an official data source"}.`),
+        traceEvent("source", "Official observations loaded", `${widget.rows.length} rows were returned by the connector.`),
+        traceEvent("validation", "Widget contract validated", `${widget.columns.length} columns and ${widget.rows.length} rows passed deterministic validation.`),
+      ],
+    },
   }));
 }
 
 function friendlyError(error: unknown) {
   if (error instanceof OpenAI.AuthenticationError) {
-    return [401, "OpenAI API key 无效，请检查 OPENAI_API_KEY。"] as const;
+    return { status: 401, code: "authentication_error", message: "OpenAI API key 无效，请检查 OPENAI_API_KEY。", detail: "Authentication failed before analysis began.", retryable: false };
   }
   if (error instanceof OpenAI.RateLimitError) {
-    return [429, "OpenAI 请求过于频繁或额度不足，请稍后再试。"] as const;
+    return { status: 429, code: "rate_limit", message: "OpenAI 请求过于频繁或额度不足，请稍后再试。", detail: "The provider rejected the request before a widget could be completed.", retryable: true };
   }
   if (error instanceof OpenAI.APIConnectionTimeoutError) {
-    return [504, "本次检索达到时间预算，已停止继续消耗。可以缩小范围或接受部分数据后重试。"] as const;
+    return { status: 504, code: "research_timeout", message: "本次检索达到时间预算，已停止继续消耗。", detail: "No incomplete model output was rendered. You can safely retry the original request.", retryable: true };
   }
   if (error instanceof OpenAI.APIError) {
-    return [502, "OpenAI 暂时无法完成这次查询，请稍后再试。"] as const;
+    return { status: 502, code: "provider_error", message: "OpenAI 暂时无法完成这次查询。", detail: "The upstream provider returned an API error.", retryable: true };
   }
-  return [500, "生成组件时发生错误，请重试。"] as const;
+  if (error instanceof z.ZodError) {
+    const issues = error.issues.slice(0, 3).map((issue) => issue.path.join(".") || "response").join(", ");
+    return { status: 422, code: "structured_output_invalid", message: "返回的数据结构未通过组件验证。", detail: `Invalid fields: ${issues || "unknown"}. Existing dashboard data was not changed.`, retryable: true };
+  }
+  return { status: 500, code: "internal_error", message: "服务器未能完成这次分析。", detail: "Unexpected server-side failure. The detailed error is available only in server logs under the request ID.", retryable: true };
 }
 
 async function searchForWidget(
@@ -343,6 +439,7 @@ async function analyzeUserDataset(
   query: string,
   dataset: UserDataset,
 ) {
+  const startedAt = Date.now();
   const response = await client.responses.parse(
     {
       model: getOpenAIModel(),
@@ -371,16 +468,35 @@ async function analyzeUserDataset(
       widget: null,
       conversationContext: query,
       usage,
+      trace: {
+        mode: "user_data",
+        summary: "Analyzed the supplied dataset without web search, but no widget was produced.",
+        events: [
+          traceEvent("route", "User-data route selected", `${dataset.name} (${dataset.format.toUpperCase()}, ${dataset.content.length.toLocaleString()} characters) was treated as the only data source.`),
+          traceEvent("validation", "Analysis did not produce a widget", parsed.message, parsed.status === "cannot_answer" ? "failed" : "warning", Date.now() - startedAt),
+        ],
+      },
     }));
   }
 
-  const widget = widgetSpecSchema.parse({
-    ...parsed.widget,
-    id: crypto.randomUUID(),
-    originalQuery: query,
-    sources: [],
-    generatedAt: new Date().toISOString(),
-  });
+  const widget = normalizeModelWidget(parsed.widget, query, []);
+  if (!widget) {
+    return Response.json(generateWidgetResultSchema.parse({
+      status: "cannot_answer",
+      message: "已读取数据，但生成的行列结构无法安全渲染。原数据和现有仪表板未被修改。",
+      widget: null,
+      conversationContext: query,
+      usage,
+      trace: {
+        mode: "user_data",
+        summary: "The supplied data was analyzed, but the proposed widget failed normalization.",
+        events: [
+          traceEvent("route", "User-data route selected", `${dataset.name} was used without web search.`),
+          traceEvent("validation", "Widget normalization failed", "The proposed rows or columns could not be converted to the safe widget contract.", "failed", Date.now() - startedAt),
+        ],
+      },
+    }));
+  }
   const widgetWithQuality = widgetSpecSchema.parse({
     ...widget,
     dataQuality: buildUserDataQuality(widget, dataset),
@@ -391,6 +507,15 @@ async function analyzeUserDataset(
     widget: widgetWithQuality,
     conversationContext: query,
     usage,
+    trace: {
+      mode: "user_data",
+      summary: "Analyzed only the user-supplied dataset; no web search was used.",
+      events: [
+        traceEvent("route", "User-data route selected", `${dataset.name} (${dataset.format.toUpperCase()}, ${dataset.content.length.toLocaleString()} characters) was used as the sole source.`),
+        traceEvent("transform", "Dataset analyzed", `Prepared ${widget.rows.length} rows and ${widget.columns.length} columns for a ${widget.visualization.replace("_", " ")}.`, "complete", Date.now() - startedAt),
+        traceEvent("validation", "Widget contract validated", "Column count, row shape, cell lengths, and numeric chart requirements passed."),
+      ],
+    },
   }));
 }
 
@@ -427,6 +552,7 @@ async function researchOneSeries(
   series: SeriesPlan,
   allowPartialData: boolean,
 ): Promise<SeriesResearch> {
+  const startedAt = Date.now();
   const response = await client.responses.parse(
     {
       model: getOpenAIFastModel(),
@@ -467,6 +593,8 @@ async function researchOneSeries(
     plan: series,
     parsed: response.output_parsed,
     sources: collectSources(response),
+    searches: collectSearchQueries(response),
+    durationMs: Date.now() - startedAt,
     usage: readUsage(response),
   };
 }
@@ -595,6 +723,28 @@ function assembleResearchWidget(
     widget,
     conversationContext: query,
     usage,
+    trace: {
+      mode: "research_harness",
+      summary: `Planned, researched, aligned, and validated ${boundedSeries.length} independent series.`,
+      events: [
+        traceEvent("route", "Research harness selected", "The request required multiple independently sourced series and deterministic alignment."),
+        traceEvent("plan", "Execution plan created", boundedSeries.map((result) => `${result.plan.label} → ${result.plan.sourcePreference}`).join("; ")),
+        ...boundedSeries.map((result, index) => {
+          const points = seriesMaps[index].size;
+          const status = result.parsed?.status === "success" && points >= 2 ? "complete" : points ? "warning" : "failed";
+          return traceEvent(
+            "search",
+            `Researched ${result.plan.label}`,
+            `${result.searches.join("; ") || result.plan.searchQuery} · ${result.sources.length} cited source${result.sources.length === 1 ? "" : "s"} · ${points} verified observation${points === 1 ? "" : "s"}.`,
+            status,
+            result.durationMs,
+          );
+        }),
+        traceEvent("source", "Sources deduplicated", `${sources.length} unique cited source${sources.length === 1 ? "" : "s"} retained for the widget.`),
+        traceEvent("transform", "Series aligned", `${periods.length} union periods were aligned; ${plan.calculation === "level" ? "raw levels were preserved" : `${plan.calculation.toUpperCase()} changes were calculated only from verified adjacent observations`}; gaps remain empty.`),
+        traceEvent("validation", "Coverage validated", `${availablePoints}/${requestedPoints} numeric observations are present. Missing values were not inferred.`, availablePoints === requestedPoints ? "complete" : "warning"),
+      ],
+    },
   }));
 }
 
@@ -676,6 +826,7 @@ async function resolveIntent(
 }
 
 export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
   let query = "";
   let conversationContext = "";
   let history: ConversationTurn[] = [];
@@ -695,12 +846,18 @@ export async function POST(request: Request) {
     skipClarification = body.skipClarification === true;
     userDataset = parseUserDataset(body.userData);
   } catch {
-    return Response.json({ error: "请求格式无效。" }, { status: 400 });
+    return Response.json({
+      error: "请求格式无效。",
+      code: "invalid_request",
+      detail: "The JSON body could not be parsed.",
+      requestId,
+      retryable: false,
+    }, { status: 400 });
   }
 
   if (!query || query.length > 500) {
     return Response.json(
-      { error: "请输入 1–500 个字符的数据问题。" },
+      { error: "请输入 1–500 个字符的数据问题。", code: "invalid_query", detail: "The query must contain between 1 and 500 characters.", requestId, retryable: false },
       { status: 400 },
     );
   }
@@ -708,7 +865,7 @@ export async function POST(request: Request) {
   try {
     if (userDataset) {
       if (!process.env.OPENAI_API_KEY) {
-        return Response.json({ error: "缺少 OPENAI_API_KEY，暂时无法分析用户上传的数据。" }, { status: 503 });
+        return Response.json({ error: "缺少 OPENAI_API_KEY，暂时无法分析用户上传的数据。", code: "configuration_error", detail: "User-data analysis requires the configured model provider.", requestId, retryable: false }, { status: 503 });
       }
       return analyzeUserDataset(getOpenAIClient(), query, userDataset);
     }
@@ -726,7 +883,7 @@ export async function POST(request: Request) {
 
     if (!process.env.OPENAI_API_KEY && !deterministicFollowUp && !completeQualifiedRequest) {
       return Response.json(
-        { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。" },
+        { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。", code: "configuration_error", detail: "No exact connector matched, so model-assisted intent resolution was required.", requestId, retryable: false },
         { status: 503 },
       );
     }
@@ -766,6 +923,14 @@ export async function POST(request: Request) {
               widget: null,
               conversationContext: nextContext,
               usage: intentUsage,
+              trace: {
+                mode: "intent",
+                summary: "Clarification was requested because a missing choice materially changes the dataset.",
+                events: [
+                  traceEvent("route", "Intent resolution used", "No exact deterministic connector matched the latest message."),
+                  traceEvent("plan", "Material ambiguity found", intent.message, "warning"),
+                ],
+              },
             }),
           );
         }
@@ -786,12 +951,13 @@ export async function POST(request: Request) {
 
     if (!client) {
       return Response.json(
-        { error: "这个限定条件没有匹配到官方连接器，并且缺少用于检索的 OPENAI_API_KEY。" },
+        { error: "这个限定条件没有匹配到官方连接器，并且缺少用于检索的 OPENAI_API_KEY。", code: "configuration_error", detail: "An exact connector was not available and Web Search could not be started.", requestId, retryable: false },
         { status: 503 },
       );
     }
 
     let accumulatedUsage = intentUsage ?? ZERO_USAGE;
+    let harnessFallbackUsed = false;
     let proxyCandidate: Awaited<ReturnType<typeof resolveWithOfficialProxy>> = null;
     if (isKnownProxyResearchRequest(resolvedQuery)) {
       proxyCandidate = await resolveWithOfficialProxy(resolvedQuery);
@@ -802,7 +968,16 @@ export async function POST(request: Request) {
         if (!proxyCandidate) throw error;
       }
       if (proxyCandidate) {
-        const proxyResponse = connectorResponse(proxyCandidate, resolvedQuery, accumulatedUsage);
+        const proxyResponse = connectorResponse(proxyCandidate, resolvedQuery, accumulatedUsage, {
+          mode: "fallback",
+          summary: "The exact series was unavailable through a deterministic connector, so an explicitly labelled official proxy was used.",
+          events: [
+            traceEvent("route", "Exact connector not found", "Requested qualifiers were preserved instead of substituting an unrelated aggregate.", "warning"),
+            traceEvent("search", "Exact-series discovery run", "A focused Web Search checked whether the exact qualified series was published."),
+            traceEvent("fallback", "Official proxy selected", proxyCandidate.message, "warning"),
+            traceEvent("validation", "Proxy widget validated", `${proxyCandidate.widget.rows.length} rows passed the widget contract.`),
+          ],
+        });
         if (proxyResponse) return proxyResponse;
       }
     }
@@ -818,6 +993,7 @@ export async function POST(request: Request) {
         if (harnessResponse) return harnessResponse;
       } catch (error) {
         console.error("[Polaris research harness]", error);
+        harnessFallbackUsed = true;
       }
     }
 
@@ -839,7 +1015,15 @@ export async function POST(request: Request) {
       const proxyResult = parsed.status === "cannot_answer"
         ? proxyCandidate ?? await resolveWithOfficialProxy(resolvedQuery)
         : null;
-      const proxyResponse = connectorResponse(proxyResult, resolvedQuery, usage);
+      const proxyResponse = connectorResponse(proxyResult, resolvedQuery, usage, proxyResult ? {
+        mode: "fallback",
+        summary: "Web research could not produce the exact requested widget, so an explicitly labelled official proxy was used.",
+        events: [
+          traceEvent("route", "Web research completed", `Polaris made ${usage.webSearchCalls} search call${usage.webSearchCalls === 1 ? "" : "s"}.`, "warning"),
+          traceEvent("fallback", "Official proxy selected", proxyResult.message, "warning"),
+          traceEvent("validation", "Proxy widget validated", `${proxyResult.widget.rows.length} rows passed the widget contract.`),
+        ],
+      } : undefined);
       if (proxyResponse) return proxyResponse;
 
       const message =
@@ -854,17 +1038,42 @@ export async function POST(request: Request) {
         widget: null,
         conversationContext: resolvedQuery,
         usage,
+        trace: {
+          mode: "web_search",
+          summary: "Web research completed, but the evidence was insufficient for an honest widget.",
+          events: [
+            traceEvent("route", "Web research selected", "No exact connector matched the resolved request."),
+            ...(harnessFallbackUsed ? [traceEvent("fallback", "Research harness fallback", "The multi-series harness did not complete, so Polaris retried with a consolidated Web Search route.", "warning")] : []),
+            ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+            traceEvent("source", "Sources collected", `${sources.length} cited source${sources.length === 1 ? "" : "s"} were retained.`, sources.length ? "complete" : "failed"),
+            traceEvent("validation", "Widget not created", message, "failed"),
+          ],
+        },
       };
       return Response.json(generateWidgetResultSchema.parse(result));
     }
 
-    const widget = widgetSpecSchema.parse({
-      ...parsed.widget,
-      id: crypto.randomUUID(),
-      originalQuery: resolvedQuery,
-      sources,
-      generatedAt: new Date().toISOString(),
-    });
+    const widget = normalizeModelWidget(parsed.widget, resolvedQuery, sources);
+    if (!widget) {
+      return Response.json(generateWidgetResultSchema.parse({
+        status: "cannot_answer",
+        message: "找到了可引用数据，但生成的行列形状无法安全规范化，因此没有更改仪表板。",
+        widget: null,
+        conversationContext: resolvedQuery,
+        usage,
+        trace: {
+          mode: "web_search",
+          summary: "Research found cited data, but widget normalization failed safely.",
+          events: [
+            traceEvent("route", "Web research selected", "No exact connector matched the request."),
+            ...(harnessFallbackUsed ? [traceEvent("fallback", "Research harness fallback", "The multi-series harness did not complete, so Polaris retried with a consolidated Web Search route.", "warning")] : []),
+            ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+            traceEvent("source", "Sources collected", `${sources.length} cited source${sources.length === 1 ? "" : "s"} retained.`),
+            traceEvent("validation", "Widget normalization failed", "Rows and columns could not be converted to the strict rendering contract. Existing data was preserved.", "failed"),
+          ],
+        },
+      }));
+    }
     const widgetWithQuality = widgetSpecSchema.parse({
       ...widget,
       dataQuality: buildWebDataQuality(widget, resolvedQuery),
@@ -877,10 +1086,37 @@ export async function POST(request: Request) {
         widget: widgetWithQuality,
         conversationContext: resolvedQuery,
         usage,
+        trace: {
+          mode: "web_search",
+          summary: "Resolved the request with cited Web Search evidence and validated the resulting widget.",
+          events: [
+            traceEvent("route", "Web research selected", "No exact deterministic connector matched the resolved request."),
+            ...(harnessFallbackUsed ? [traceEvent("fallback", "Research harness fallback", "The multi-series harness did not complete, so Polaris retried with a consolidated Web Search route.", "warning")] : []),
+            ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+            traceEvent("source", "Cited sources collected", `${sources.length} unique cited source${sources.length === 1 ? "" : "s"} retained.`),
+            traceEvent("transform", "Widget prepared", `${widget.rows.length} rows and ${widget.columns.length} columns were normalized for a ${widget.visualization.replace("_", " ")}.`),
+            traceEvent("validation", "Coverage and shape validated", `${widgetWithQuality.dataQuality?.availablePoints ?? 0}/${widgetWithQuality.dataQuality?.requestedPoints ?? 0} numeric cells are present; missing values remain empty.`, widgetWithQuality.dataQuality?.missingPoints ? "warning" : "complete"),
+          ],
+        },
       }),
     );
   } catch (error) {
-    const [status, message] = friendlyError(error);
-    return Response.json({ error: message }, { status });
+    const safe = friendlyError(error);
+    console.error(`[Polaris request:${requestId}]`, error);
+    return Response.json({
+      error: safe.message,
+      code: safe.code,
+      detail: safe.detail,
+      retryable: safe.retryable,
+      requestId,
+      trace: {
+        mode: "fallback",
+        summary: "The run stopped at an API boundary; no incomplete widget was saved.",
+        events: [
+          traceEvent("route", "Request accepted", query ? `Processing: ${query.slice(0, 180)}` : "The request body was accepted."),
+          traceEvent("validation", "Run failed", `${safe.code}: ${safe.message} ${safe.detail}`, "failed"),
+        ],
+      },
+    }, { status: safe.status });
   }
 }
