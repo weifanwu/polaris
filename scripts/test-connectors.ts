@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  resolveOfficialConnector,
   resolveWithOfficialConnector,
   resolveWithOfficialProxy,
 } from "../lib/data-connectors/index";
@@ -70,9 +71,22 @@ const population = await resolveWithOfficialConnector("过去五年加拿大和�
 assert.ok(population, "Statistics Canada connector should answer population queries");
 assert.equal(population.widget.dataQuality?.frequency, "quarterly");
 
-const usCpi = await resolveWithOfficialConnector("显示美国过去24个月的CPI同比通胀率");
-assert.ok(usCpi, "BLS connector should answer U.S. CPI queries");
-assert.equal(usCpi.widget.dataQuality?.sourceName, "U.S. Bureau of Labor Statistics");
-assert.equal(usCpi.widget.rows.length, 24);
+const permanentResidents = await resolveWithOfficialConnector("加拿大新增永久居民过去20年按月趋势");
+assert.ok(permanentResidents, "IRCC connector should parse the official monthly permanent-resident workbook");
+assert.ok(permanentResidents.widget.rows.length >= 130, "IRCC connector should return the full published monthly coverage rather than fail on XLSX");
+assert.equal(permanentResidents.widget.dataQuality?.requestedPoints, 240, "20-year monthly intent should remain visible in quality metadata");
+assert.ok((permanentResidents.widget.dataQuality?.missingPoints ?? 0) > 0, "months predating IRCC's monthly file should be disclosed, not invented");
+assert.equal(permanentResidents.widget.dataQuality?.sourceName, "IRCC Monthly Permanent Residents");
 
-console.log("Polaris live official-connector tests passed (Statistics Canada, Bank of Canada, World Bank, and U.S. BLS).");
+const usCpiResolution = await resolveOfficialConnector("显示美国过去24个月的CPI同比通胀率");
+assert.notEqual(usCpiResolution.status, "unsupported", "BLS CPI queries must remain owned by the exact connector even during an upstream outage");
+if (usCpiResolution.status === "success") {
+  assert.equal(usCpiResolution.result.widget.dataQuality?.sourceName, "U.S. Bureau of Labor Statistics");
+  assert.equal(usCpiResolution.result.widget.rows.length, 24);
+} else if (usCpiResolution.status === "unavailable") {
+  assert.equal(usCpiResolution.sourceName, "U.S. Bureau of Labor Statistics", "BLS outages should return typed source identity without a misleading fallback");
+} else {
+  assert.fail("BLS CPI queries must not be classified as unsupported");
+}
+
+console.log("Polaris live official-connector tests passed (Statistics Canada, IRCC, Bank of Canada, World Bank, and U.S. BLS).");

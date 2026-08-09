@@ -24,10 +24,10 @@ function parseCount(value: string) {
 
 export function requestedMonthlyPeriods(query: string, fallback = 24) {
   const months = query.match(/(?:过去|最近|近|last|past)\s*([一二两三四五六七八九十\d]+)\s*(?:个?月|months?)/i);
-  if (months) return Math.min(Math.max(parseCount(months[1]), 2), 120);
+  if (months) return Math.min(Math.max(parseCount(months[1]), 2), 300);
 
   const years = query.match(/(?:过去|最近|近|last|past)\s*([一二两三四五六七八九十\d]+)\s*(?:年|years?)/i);
-  if (years) return Math.min(Math.max(parseCount(years[1]) * 12, 2), 120);
+  if (years) return Math.min(Math.max(parseCount(years[1]) * 12, 2), 300);
 
   return fallback;
 }

@@ -4,7 +4,6 @@ import {
   ChevronsLeft,
   DatabaseZap,
   LayoutDashboard,
-  Orbit,
   PanelLeftOpen,
   Sparkles,
   Trash2,
@@ -15,7 +14,6 @@ type Props = {
   collapsed: boolean;
   health: ApiHealth;
   onToggle: () => void;
-  onLoadDemo: () => void;
   onClear: () => void;
 };
 
@@ -23,7 +21,6 @@ export function Sidebar({
   collapsed,
   health,
   onToggle,
-  onLoadDemo,
   onClear,
 }: Props) {
   const statusCopy =
@@ -55,9 +52,6 @@ export function Sidebar({
       <div className="sidebar-spacer" />
 
       <div className="sidebar-actions">
-        <button className="sidebar-action primary" onClick={onLoadDemo} title="Load demo widgets" aria-label="Load demo">
-          <Orbit size={16} />{!collapsed ? <span>Load demo</span> : null}
-        </button>
         <button className="sidebar-action" onClick={onClear} title="Clear dashboard" aria-label="Clear dashboard">
           <Trash2 size={16} />{!collapsed ? <span>Clear dashboard</span> : null}
         </button>

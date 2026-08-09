@@ -2,9 +2,7 @@ import type { AgentTrace, RequestUsage, WidgetSpec } from "@/lib/widget-schema";
 
 export type { AgentTrace, RequestUsage, WidgetSpec };
 
-export type DashboardWidget = WidgetSpec & {
-  isDemo?: boolean;
-};
+export type DashboardWidget = WidgetSpec;
 
 export type ChatMessage = {
   id: string;

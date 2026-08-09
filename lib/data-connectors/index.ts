@@ -1,4 +1,5 @@
 import { bankOfCanadaConnector } from "./bank-of-canada";
+import { irccPermanentResidentsConnector } from "./ircc-permanent-residents";
 import { statisticsCanadaConnector } from "./statistics-canada";
 import { detectMaterialQualifiers } from "./query-capabilities";
 import {
@@ -11,6 +12,7 @@ import { worldBankCommodityConnector } from "./world-bank-commodities";
 import { worldBankIndicatorsConnector } from "./world-bank-indicators";
 
 const CONNECTORS = [
+  irccPermanentResidentsConnector,
   worldBankCommodityConnector,
   bankOfCanadaConnector,
   worldBankIndicatorsConnector,

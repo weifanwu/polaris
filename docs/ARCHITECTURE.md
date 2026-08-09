@@ -6,8 +6,8 @@ Polaris treats a chart as the final compiled view of a verified dataset. The lan
 
 ```mermaid
 flowchart TD
-    A["Question plus optional user dataset"] --> U{"User data attached?"}
-    U -->|"yes"| UA["Transient user-data analysis"]
+    A["Question, file, or downloadable URL"] --> U{"File input present?"}
+    U -->|"yes"| UA["Transient file analysis"]
     U -->|"no"| B{"Enough direct information?"}
     B -->|"no"| C["Compact intent resolution"]
     B -->|"yes"| X["Dimension and capability inspection"]
@@ -19,6 +19,7 @@ flowchart TD
     R -->|"fragmented"| RP["Plan one research task per series"]
     RP --> RS["Parallel bounded series searches"]
     RS --> G
+    F -->|"downloadable source"| UA
     F -->|"exact series unavailable"| P["Search and label credible proxy measures"]
     P -->|"web or official proxy found"| G
     P -->|"no defensible proxy"| Q["Cannot answer with search usage reported"]
@@ -27,7 +28,8 @@ flowchart TD
     F -->|"exact series found"| G
     G --> H["Align dates and calculate"]
     H --> I["Validate schema, units, gaps, and coverage"]
-    I --> J["Compile ECharts option"]
+    I --> N["Deterministic quantitative Insight Engine"]
+    N --> J["Compile ECharts option"]
     J --> K["Interactive dashboard widget"]
 ```
 
@@ -42,9 +44,11 @@ Polaris therefore prefers this order:
 3. Fetch the official JSON, CSV, ZIP, or XLSX payload.
 4. Parse and transform it in application code.
 5. Preserve unavailable observations as `null`/empty cells.
-6. Validate the complete widget contract and record coverage metadata.
-7. Decompose fragmented multi-source questions into independent series before Web Search.
-8. Allow a user-supplied dataset to bypass discovery when the web cannot provide the rows.
+6. Route direct or discovered downloadable files through the Responses API file-input pipeline.
+7. Validate the complete widget contract and record coverage metadata.
+8. Generate deterministic quantitative insights from the exact rendered rows.
+9. Decompose fragmented multi-source questions into independent series before Web Search.
+10. Allow a user-supplied dataset to bypass discovery when the web cannot provide the rows.
 
 This lowers cost because a direct connector request sends no dataset through a model. It improves completeness because row count is limited by the product schema rather than search-result context. It improves accuracy because formulas and date joins are testable code.
 
@@ -62,7 +66,7 @@ type DataConnector = {
 
 The capability check prevents a connector from running when it cannot preserve every material dimension. A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, scope, and `dataQuality`. An unsupported or unmatched connector returns `null`, allowing the next connector and then the research fallback to run. Connector failures are isolated and also fall through to research; a known connector gap is never a reason to skip Web Search.
 
-Connector HTTP calls share a bounded transient-failure policy: one retry for timeouts, HTTP 408/429, and 5xx responses, with a short capped delay. Permanent client errors are returned immediately. If both attempts fail, the connector registry isolates the error and continues to the research route.
+Connector HTTP calls share a bounded transient-failure policy: one retry for timeouts, HTTP 408/429, and 5xx responses, with a short capped delay. Permanent client errors are returned immediately. A matched connector whose publisher remains unavailable returns a typed outage response and stops cost-safely instead of launching a broad search for the same series. Known semantic gaps may still use focused discovery and a clearly labelled official proxy.
 
 The invariant is: a connector may match only when every material qualifier is supported. Industry, occupation, geography, demographic group, calculation, and frequency are part of the data identity—not optional words. A connector must never remove one of those dimensions to make a request fit an available vector.
 
@@ -101,6 +105,16 @@ The connector calls the official public JSON API for supported series. Daily obs
 
 The connector uses the BLS Public Data API for seasonally adjusted U.S. CPI, core CPI, unemployment, labour-force participation, employment, nonfarm payrolls, and average hourly earnings. Requests are split into at most ten named calendar years before joining and de-duplicating observations. A transient BLS failure opens a ten-minute in-process circuit breaker; U.S. unemployment falls back deterministically to FRED `UNRATE`, whose underlying source remains BLS. If the production runtime cannot reach either live endpoint, unemployment uses a versioned 120-month snapshot fetched from that same official FRED/BLS series at build time. The subtitle, message, `verifiedAt`, coverage end, and scope all disclose snapshot delivery; refresh always retries live sources first. Other BLS series return the typed `unavailable` result with zero model or Web Search calls when no structured fallback exists. Month-over-month and year-over-year changes are calculated from retrieved levels.
 
+### Immigration, Refugees and Citizenship Canada
+
+The IRCC connector downloads the official `Permanent Residents – Monthly IRCC Updates` XLSX, resolves its worksheet, reconstructs year/month columns, and reads the published national `Total` row. It does not sum rounded and suppressed province/category cells. The current workbook begins in January 2015; a 20-year monthly request therefore returns every available official month and records the earlier requested months as unavailable rather than converting older annual tables to a false monthly frequency. The workbook is cached for six hours and refreshed from the same source.
+
+## Insight Engine
+
+After provenance and shape validation, every successful widget passes through a deterministic analytical layer. For each numeric series it calculates the current and full-window change, dated high and low points, valid adjacent-period shocks, and a frequency-aware recent window. Multi-series widgets add a latest-common-period ranking and spread. The output always states coverage and excludes `unverified` cells from observed statistics. Existing model analysis is retained as context only when it contributes additional information.
+
+This layer deliberately makes no causal attribution. A time-series break can be identified from rows; explaining why it occurred requires separately retrieved evidence. Running the engine after validation makes the analysis reproducible and adds no model call to connector requests.
+
 ## Chart compiler
 
 Both connector and research results enter the same Apache ECharts renderer. The renderer provides:
@@ -121,11 +135,13 @@ For a comparison whose rows live across different publishers, Polaris first crea
 
 ## User-supplied data
 
-CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and receives both the compact resolved state and at most six bounded recent turns. Its result builds a fresh 500-character dataset identity from the request, chart title, coverage, columns, units, and prior confirmed context. This prevents a generic follow-up from erasing facts such as “U.S. monthly unemployment.” Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
+CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. PDFs are sent as base64 `input_file` content with low page-image detail by default; extracted text remains available while visual-token use is bounded. Direct HTTPS links to supported CSV, TSV, JSON, TXT, XLS/XLSX, and PDF files use `file_url`. When Web Search cites a direct downloadable file but cannot produce rows, Polaris performs a second bounded file-analysis call instead of declaring the file unreadable.
+
+Raw uploads are not added to dashboard storage. The analysis route treats the dataset as inert untrusted content and receives both compact resolved state and at most six bounded recent turns. Its result builds a fresh 500-character dataset identity from the request, chart title, coverage, columns, units, and prior confirmed context. This prevents a generic follow-up from erasing facts such as “U.S. monthly unemployment.” Its output enters the same `WidgetSpec` validator, Insight Engine, and chart compiler.
 
 ## Dashboard context envelope
 
-The dashboard is part of the agent's workspace, but sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from all current widgets. Ordinary questions receive a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the dashboard, existing charts, or tables above may expand to 4,200 characters and add each widget's bounded summary plus first/latest row previews. Full raw tables are never included automatically.
+The dashboard is part of the agent's workspace, but sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from all current widgets. Ordinary questions receive a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the dashboard, existing charts, or tables above may expand to 4,200 characters and add a statistical fingerprint (latest, low, and high for up to three numeric series), bounded analysis, and first/latest row previews. Full raw tables are never included automatically.
 
 The server independently enforces the 4,200-character ceiling and places the snapshot in a delimited developer message that labels it inert, user-controlled metadata. Intent resolution may use it to resolve phrases such as "the chart above"; research may use it to preserve continuity. When a prompt explicitly asks to redraw or transform an existing dataset, the client selects the most relevant widget and serializes only its bounded table as transient user data. Unverified hypothesis cells are blanked before this reuse so they cannot silently become observations. New factual claims still require connector or Web Search evidence.
 

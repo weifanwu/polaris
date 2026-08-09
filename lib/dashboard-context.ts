@@ -17,6 +17,7 @@ const IDENTITY_SIGNALS = [
   /(?:房价|housing|home price)/i,
   /(?:黄金|金价|gold)/i,
   /(?:gdp|国内生产总值)/i,
+  /(?:移民|永久居民|immigration|permanent resident)/i,
 ];
 
 function clean(value: string | null | undefined, limit: number) {
@@ -36,6 +37,24 @@ function compactWidgetLine(widget: WidgetSpec) {
     .join(", ")
     .slice(0, 220);
   return `[${clean(widget.id, 40)}] ${clean(widget.title, 80)} | ${widget.visualization} | ${widget.rows.length} rows | coverage ${quality?.coverageStart ?? "?"}→${quality?.coverageEnd ?? "?"}${quality?.unverifiedPoints ? ` | ${quality.unverifiedPoints} unverified hypothesis points` : ""} | columns: ${columns} | source: ${clean(quality?.sourceName ?? widget.sources[0]?.title ?? "unknown", 70)} | request: ${clean(widget.originalQuery, 100)}`;
+}
+
+function statisticalFingerprint(widget: WidgetSpec) {
+  return widget.columns.flatMap((column, columnIndex) => {
+    if (columnIndex === 0 || column.dataType !== "number") return [];
+    const points = widget.rows.flatMap((row) => {
+      if (row.cellStatus?.[columnIndex] === "unverified") return [];
+      const value = Number((row.cells[columnIndex] ?? "").replace(/[,$%\s]/g, ""));
+      return Number.isFinite(value) && (row.cells[columnIndex] ?? "").trim()
+        ? [{ period: row.cells[0], value }]
+        : [];
+    });
+    if (!points.length) return [];
+    const low = points.reduce((best, point) => point.value < best.value ? point : best);
+    const high = points.reduce((best, point) => point.value > best.value ? point : best);
+    const latest = points.at(-1)!;
+    return [`${clean(column.label, 28)} latest=${latest.value}@${clean(latest.period, 18)}, low=${low.value}@${clean(low.period, 18)}, high=${high.value}@${clean(high.period, 18)}`];
+  }).slice(0, 3).join("; ").slice(0, 420);
 }
 
 export function queryReferencesDashboard(query: string) {
@@ -93,7 +112,7 @@ export function buildDashboardContext(widgets: WidgetSpec[], query: string) {
   for (const widget of widgets) {
     const base = compactWidgetLine(widget);
     const details = expanded
-      ? ` | summary: ${clean(widget.summary, 180)} | first: ${rowPreview(widget, widget.rows[0])} | latest: ${rowPreview(widget, widget.rows.at(-1))}`
+      ? ` | statistical fingerprint: ${statisticalFingerprint(widget)} | analysis: ${clean(widget.summary, 300)} | first: ${rowPreview(widget, widget.rows[0])} | latest: ${rowPreview(widget, widget.rows.at(-1))}`
       : "";
     const minimum = `[${clean(widget.id, 40)}] ${clean(widget.title, 80)} | ${widget.rows.length} rows | ${widget.dataQuality?.coverageEnd ?? "coverage unknown"}`;
     const candidate = `${base}${details}`;

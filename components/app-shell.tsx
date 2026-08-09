@@ -6,7 +6,6 @@ import { Activity, Clock3 } from "lucide-react";
 import { ChatPanel } from "./chat-panel";
 import { DashboardGrid } from "./dashboard-grid";
 import { Sidebar } from "./sidebar";
-import { demoWidgets } from "@/lib/demo-data";
 import { buildDashboardContext, buildReferencedWidgetDataset } from "@/lib/dashboard-context";
 import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
@@ -44,13 +43,6 @@ function addWidgetToLayouts(
     next[breakpoint] = [...current, item];
   }
   return next;
-}
-
-function layoutsForWidgets(widgets: DashboardWidget[]) {
-  return widgets.reduce<ResponsiveLayouts>(
-    (layouts, widget) => addWidgetToLayouts(layouts, widget),
-    {},
-  );
 }
 
 async function requestWidget(
@@ -397,7 +389,7 @@ export function AppShell() {
       }
       setWidgets((current) => current.map((widget) =>
         widget.id === id
-          ? { ...candidate, id, originalQuery: existing.originalQuery, isDemo: false }
+          ? { ...candidate, id, originalQuery: existing.originalQuery }
           : widget,
       ));
       const advanced = Boolean(
@@ -446,18 +438,6 @@ export function AppShell() {
     });
   }, []);
 
-  const loadDemo = useCallback(() => {
-    setWidgets(demoWidgets);
-    setLayouts(layoutsForWidgets(demoWidgets));
-    setConversationContext("");
-    setLastFailedRequest(null);
-    setMessages([{
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "Loaded three local demo widgets. They are clearly marked and do not use Web Search.",
-    }]);
-  }, []);
-
   const clearDashboard = useCallback(() => {
     setWidgets([]);
     setLayouts({});
@@ -479,7 +459,6 @@ export function AppShell() {
         collapsed={navCollapsed}
         health={health}
         onToggle={() => setNavCollapsed((value) => !value)}
-        onLoadDemo={loadDemo}
         onClear={clearDashboard}
       />
 

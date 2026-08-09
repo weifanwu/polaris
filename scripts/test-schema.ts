@@ -19,7 +19,8 @@ import {
 } from "../lib/data-connectors/query-utils";
 import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { listWorksheetNames } from "../lib/data-connectors/xlsx";
-import { MAX_USER_DATA_CHARS, parseUserDataset } from "../lib/user-dataset";
+import { MAX_USER_DATA_CHARS, parseUserDataset, remoteDatasetFromUrl } from "../lib/user-dataset";
+import { buildWidgetInsights } from "../lib/insight-engine";
 import { fetchWithTransientRetry } from "../lib/data-connectors/http";
 import { buildDashboardContext, buildReferencedWidgetDataset, MAX_DASHBOARD_CONTEXT_CHARS, parseDashboardContext, queryReferencesDashboard, queryReferencesDataset } from "../lib/dashboard-context";
 import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
@@ -133,19 +134,19 @@ assert.equal(
 assert.equal(
   widgetSpecSchema.safeParse({
     ...valid,
-    rows: Array.from({ length: 121 }, () => ({ cells: ["2026-08-06", "42"] })),
+    rows: Array.from({ length: 301 }, () => ({ cells: ["2026-08-06", "42"] })),
   }).success,
   false,
-  "more than 120 rows should fail",
+  "more than 300 rows should fail",
 );
 
 assert.equal(
   widgetSpecSchema.safeParse({
     ...valid,
-    rows: Array.from({ length: 120 }, (_, index) => ({ cells: [`2026-${String(index + 1).padStart(2, "0")}`, "42"] })),
+    rows: Array.from({ length: 240 }, (_, index) => ({ cells: [`period-${String(index + 1).padStart(3, "0")}`, "42"] })),
   }).success,
   true,
-  "official connectors should support up to 120 rows",
+  "official connectors should support 20 years of monthly rows",
 );
 
 assert.equal(
@@ -216,6 +217,16 @@ assert.equal(
   parseUserDataset({ name: "large.csv", format: "csv", content: "x".repeat(MAX_USER_DATA_CHARS + 1) }),
   null,
   "oversized user datasets must be rejected before model input",
+);
+assert.equal(
+  parseUserDataset({ name: "report.pdf", format: "pdf", content: "", fileData: "data:application/pdf;base64,JVBERi0=" })?.format,
+  "pdf",
+  "bounded PDF attachments should pass through as file inputs",
+);
+assert.equal(
+  remoteDatasetFromUrl("https://example.com/data/monthly.csv")?.format,
+  "csv",
+  "direct downloadable data URLs should be recognized by the file-first route",
 );
 
 const boundedHistory = parseConversationHistory(
@@ -328,10 +339,28 @@ assert.match(dashboardDataset?.content ?? "", /^2026-02,$/m, "previous hypothesi
 assert.equal(requestedMonthlyPeriods("过去两年的金价"), 24, "Chinese year ranges should become monthly periods");
 assert.equal(requestedMonthlyPeriods("过去二十四个月的CPI"), 24, "compound Chinese numerals should be parsed");
 assert.equal(requestedMonthlyPeriods("last 18 months of silver"), 18, "English month ranges should be parsed");
+assert.equal(requestedMonthlyPeriods("加拿大过去20年每月永久居民人数"), 240, "20-year monthly requests should preserve 240 requested periods");
 assert.equal(requestedDailyPeriods("最近7个交易日"), 7, "daily trading periods should be parsed");
 assert.equal(requestedQuarterlyPeriods("过去五年人口"), 20, "year ranges should become quarterly periods");
 assert.equal(requestedAnnualPeriods("过去十年GDP"), 10, "annual periods should be parsed");
 assert.equal(requestedCalculation("黄金每个月环比"), "mom", "month-over-month calculations should be explicit");
+
+const insightFixture = widgetSpecSchema.parse({
+  ...valid,
+  title: "美国失业率",
+  originalQuery: "过去十年美国每月失业率",
+  rows: [
+    { cells: ["2020-02", "3.5"] },
+    { cells: ["2020-03", "4.4"] },
+    { cells: ["2020-04", "14.8"] },
+    { cells: ["2026-07", "4.1"] },
+  ],
+  dataQuality: { ...valid.dataQuality, requestedPoints: 4, availablePoints: 4, frequency: "monthly" },
+});
+const insight = buildWidgetInsights(insightFixture);
+assert.match(insight, /2020-04/, "analysis should identify the dated peak instead of only comparing endpoints");
+assert.match(insight, /最大相邻期变化/, "analysis should quantify the largest adjacent-period shift");
+assert.match(insight, /不把.*因果/, "analysis should state its causal boundary");
 
 const workbook = zipSync({
   "xl/workbook.xml": strToU8('<?xml version="1.0"?><workbook><sheets><sheet name="Monthly Prices" r:id="rId2"/></sheets></workbook>'),

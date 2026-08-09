@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, ArrowUp, Bot, ChevronDown, ChevronRight, FileSpreadsheet, PanelRightClose, PanelRightOpen, Paperclip, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { listWorksheetNames, readWorksheet } from "@/lib/data-connectors/xlsx";
-import { MAX_USER_DATA_CHARS, type UserDataset } from "@/lib/user-dataset";
+import { MAX_USER_DATA_CHARS, MAX_USER_FILE_BYTES, userDatasetSizeLabel, type UserDataset } from "@/lib/user-dataset";
 import type { ChatMessage } from "@/types";
 
 export const examplePrompts = [
@@ -53,7 +53,20 @@ export function ChatPanel({
       let content = "";
       let format: UserDataset["format"] = "text";
 
-      if (extension === "xlsx") {
+      if (extension === "pdf") {
+        if (file.size > MAX_USER_FILE_BYTES) {
+          throw new Error("PDF files must be 8 MB or smaller to keep analysis time and token use bounded.");
+        }
+        const fileData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not encode this PDF."));
+          reader.onerror = () => reject(reader.error ?? new Error("Could not read this PDF."));
+          reader.readAsDataURL(file);
+        });
+        onDatasetChange({ name: file.name, format: "pdf", content: "", fileData, byteSize: file.size });
+        setDataTrayOpen(true);
+        return;
+      } else if (extension === "xlsx") {
         const workbook = await file.arrayBuffer();
         const sheetName = listWorksheetNames(workbook)[0];
         if (!sheetName) throw new Error("The workbook does not contain a readable worksheet.");
@@ -184,7 +197,7 @@ export function ChatPanel({
             {userDataset && userDataset.name !== "Pasted data" ? (
               <div className="dataset-chip">
                 <FileSpreadsheet size={14} />
-                <div><strong>{userDataset.name}</strong><span>{userDataset.content.length.toLocaleString()} characters{userDataset.truncated ? " · trimmed" : ""}</span></div>
+                <div><strong>{userDataset.name}</strong><span>{userDatasetSizeLabel(userDataset)}{userDataset.truncated ? " · trimmed" : ""}</span></div>
                 <button onClick={() => onDatasetChange(null)} aria-label="Remove attached dataset"><X size={13} /></button>
               </div>
             ) : (
@@ -202,7 +215,7 @@ export function ChatPanel({
               />
             )}
             <div className="data-tray-footer">
-              <span>CSV · TSV · JSON · XLSX · TXT</span>
+              <span>CSV · TSV · JSON · XLSX · PDF · TXT</span>
               <button onClick={() => fileRef.current?.click()} disabled={Boolean(loadingStage)}><Paperclip size={13} /> Choose file</button>
             </div>
             {dataError ? <p className="data-error">{dataError}</p> : null}
@@ -212,7 +225,7 @@ export function ChatPanel({
           ref={fileRef}
           className="file-input"
           type="file"
-          accept=".csv,.tsv,.json,.xlsx,.txt,text/csv,text/tab-separated-values,application/json"
+          accept=".csv,.tsv,.json,.xlsx,.pdf,.txt,text/csv,text/tab-separated-values,application/json,application/pdf"
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) void attachFile(file);

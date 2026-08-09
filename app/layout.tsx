@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const description = "把实时 Web 数据变成可以保存、排列与刷新的可视化组件。";
+const description = "An open-source data analysis agent that turns questions, official sources, and your files into evidence-backed interactive dashboards.";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -27,18 +27,21 @@ export async function generateMetadata(): Promise<Metadata> {
   const imageUrl = `${protocol}://${host}/og.png`;
 
   return {
-    title: "北极星 Polaris",
+    title: "Polaris — Open-Source Data Analysis Agent",
     description,
+    applicationName: "Polaris",
+    creator: "Weifan Wu",
+    keywords: ["data analysis", "AI agent", "open source", "data visualization", "official data", "OpenAI"],
     openGraph: {
-      title: "北极星 Polaris",
-      description: "Live web data, shaped around your questions.",
+      title: "Polaris — Ask questions. Get evidence-backed dashboards.",
+      description,
       type: "website",
       images: [{ url: imageUrl, width: 1200, height: 630, alt: "北极星 Polaris dashboard preview" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "北极星 Polaris",
-      description: "Live web data, shaped around your questions.",
+      title: "Polaris — Open-Source Data Analysis Agent",
+      description,
       images: [imageUrl],
     },
   };

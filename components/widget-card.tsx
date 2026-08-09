@@ -72,7 +72,6 @@ export function WidgetCard({
           <div>
             <div className="widget-title-row">
               <h3>{widget.title}</h3>
-              {widget.isDemo ? <span className="demo-pill">Demo data</span> : null}
               {quality ? (
                 <span
                   className={`quality-pill ${quality.method === "official_connector" ? "official" : quality.method === "user_data" ? "uploaded" : "searched"}`}
@@ -126,17 +125,15 @@ export function WidgetCard({
 
       <div className="widget-content"><WidgetContent widget={widget} /></div>
       {showAnalysis ? (
-        <section className="widget-analysis" aria-label="Polaris analysis">
-          <div><BrainCircuit size={14} /><strong>POLARIS ANALYSIS</strong></div>
+        <section className="widget-analysis" aria-label="Polaris insights">
+          <div><BrainCircuit size={14} /><strong>POLARIS INSIGHTS</strong></div>
           <p>{widget.summary || "No additional analysis was generated."}</p>
         </section>
       ) : null}
 
       <footer className="widget-footer">
         <div className="source-list">
-          {widget.isDemo ? (
-            <span className="local-source">Local preview · not Web Search</span>
-          ) : isUserData ? (
+          {isUserData ? (
             <span className="local-source">User supplied · {quality?.sourceName}</span>
           ) : widget.sources.length ? (
             widget.sources.slice(0, 5).map((source, index) => (
