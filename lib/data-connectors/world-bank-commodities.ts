@@ -1,5 +1,6 @@
 import type { DataConnector } from "./types";
 import { hasSubnationalGeography } from "./query-capabilities";
+import { fetchWithTransientRetry } from "./http";
 import { readWorksheet } from "./xlsx";
 import {
   isChineseQuery,
@@ -63,7 +64,7 @@ function findCommodities(query: string) {
 
 async function discoverDataUrl() {
   try {
-    const response = await fetch(SOURCE_PAGE, { signal: AbortSignal.timeout(10_000) });
+    const response = await fetchWithTransientRetry(SOURCE_PAGE, {}, { timeoutMs: 10_000 });
     if (!response.ok) return FALLBACK_DATA_URL;
     const html = await response.text();
     const match = html.match(/href=["']([^"']*CMO-Historical-Data-Monthly\.xlsx[^"']*)["']/i);
@@ -81,7 +82,7 @@ function normalizeUnit(unit: string) {
 
 async function loadDataset() {
   const dataUrl = await discoverDataUrl();
-  const response = await fetch(dataUrl, { signal: AbortSignal.timeout(20_000) });
+  const response = await fetchWithTransientRetry(dataUrl, {}, { timeoutMs: 20_000 });
   if (!response.ok) throw new Error(`World Bank workbook returned ${response.status}`);
   if (!isWorldBankHost(new URL(response.url).hostname)) throw new Error("World Bank workbook redirected outside the trusted host");
   const workbook = await response.arrayBuffer();

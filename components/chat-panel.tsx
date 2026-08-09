@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Bot, ChevronRight, FileSpreadsheet, PanelRightClose, PanelRightOpen, Paperclip, Search, Sparkles, Trash2, UserRound, X } from "lucide-react";
+import { Activity, ArrowUp, Bot, ChevronDown, ChevronRight, FileSpreadsheet, PanelRightClose, PanelRightOpen, Paperclip, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { listWorksheetNames, readWorksheet } from "@/lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, type UserDataset } from "@/lib/user-dataset";
 import type { ChatMessage } from "@/types";
@@ -16,7 +16,7 @@ type Props = {
   collapsed: boolean;
   query: string;
   messages: ChatMessage[];
-  loadingStage: "searching" | "structuring" | null;
+  loadingStage: "working" | "analyzing" | null;
   userDataset: UserDataset | null;
   onToggle: () => void;
   onClear: () => void;
@@ -149,6 +149,7 @@ export function ChatPanel({
                       {` · ${message.usage.webSearchCalls} search${message.usage.webSearchCalls === 1 ? "" : "es"}`}
                     </small>
                   ) : null}
+                  {message.trace ? <TracePanel trace={message.trace} /> : null}
                   {message.widgetId ? (
                     <button className="focus-widget" onClick={() => onFocusWidget(message.widgetId!)}>View widget <ChevronRight size={12} /></button>
                   ) : null}
@@ -160,8 +161,13 @@ export function ChatPanel({
 
         {loadingStage ? (
           <div className="agent-progress">
-            <div className="progress-orbit"><Search size={15} /></div>
-            <div><strong>{loadingStage === "searching" ? "Searching the web…" : "Structuring data…"}</strong><span>{loadingStage === "searching" ? "Finding trustworthy, current sources" : "Validating rows, columns, and chart shape"}</span></div>
+            <div className="progress-orbit"><Activity size={15} /></div>
+            <div>
+              <strong>{loadingStage === "analyzing" ? "Analyzing supplied data…" : "Agent is working…"}</strong>
+              <span>{loadingStage === "analyzing"
+                ? "Reading the attached dataset and preparing a reproducible result"
+                : "The completed run trace will show the actual route, searches, and transformations"}</span>
+            </div>
           </div>
         ) : null}
       </div>
@@ -243,5 +249,37 @@ export function ChatPanel({
         <p>{userDataset ? "Your attached data is used for this analysis only." : "Polaris can make mistakes. Verify important data at the source."}</p>
       </div>
     </aside>
+  );
+}
+
+function TracePanel({ trace }: { trace: NonNullable<ChatMessage["trace"]> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`trace-panel ${open ? "open" : ""}`}>
+      <button className="trace-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <Activity size={12} />
+        <span>RUN TRACE</span>
+        <small>{trace.events.length} steps · {trace.mode.replace("_", " ")}</small>
+        <ChevronDown size={13} />
+      </button>
+      {open ? (
+        <div className="trace-body">
+          <p>{trace.summary}</p>
+          <ol>
+            {trace.events.map((event) => (
+              <li key={event.id} className={event.status}>
+                <i />
+                <div>
+                  <strong>{event.title}</strong>
+                  <span>{event.detail}</span>
+                  {event.durationMs !== undefined ? <small>{event.durationMs.toLocaleString()} ms</small> : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <footer>Operational plan and tool activity — not private model reasoning.</footer>
+        </div>
+      ) : null}
+    </div>
   );
 }

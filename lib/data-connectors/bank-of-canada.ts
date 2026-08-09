@@ -1,5 +1,6 @@
 import type { DataConnector } from "./types";
 import { hasSubnationalGeography } from "./query-capabilities";
+import { fetchWithTransientRetry } from "./http";
 import {
   isChineseQuery,
   requestedDailyPeriods,
@@ -51,7 +52,7 @@ export const bankOfCanadaConnector: DataConnector = {
     url.searchParams.set("start_date", startDate);
     url.searchParams.set("end_date", endDate);
 
-    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    const response = await fetchWithTransientRetry(url, {}, { timeoutMs: 15_000 });
     if (!response.ok) throw new Error(`Bank of Canada Valet returned ${response.status}`);
     const payload = await response.json() as ValetResponse;
     const rawRows = (payload.observations ?? []).map((observation) => ({

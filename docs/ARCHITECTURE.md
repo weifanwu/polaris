@@ -62,6 +62,8 @@ type DataConnector = {
 
 The capability check prevents a connector from running when it cannot preserve every material dimension. A matched connector returns a normal `WidgetSpec` payload containing columns, rows, sources, scope, and `dataQuality`. An unsupported or unmatched connector returns `null`, allowing the next connector and then the research fallback to run. Connector failures are isolated and also fall through to research; a known connector gap is never a reason to skip Web Search.
 
+Connector HTTP calls share a bounded transient-failure policy: one retry for timeouts, HTTP 408/429, and 5xx responses, with a short capped delay. Permanent client errors are returned immediately. If both attempts fail, the connector registry isolates the error and continues to the research route.
+
 The invariant is: a connector may match only when every material qualifier is supported. Industry, occupation, geography, demographic group, calculation, and frequency are part of the data identity—not optional words. A connector must never remove one of those dimensions to make a request fit an available vector.
 
 The quality envelope records:
@@ -120,6 +122,14 @@ For a comparison whose rows live across different publishers, Polaris first crea
 ## User-supplied data
 
 CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and may only calculate from supplied cells. Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
+
+## Observability and failure recovery
+
+Every completed API result may include a bounded `AgentTrace` containing typed operational events: route, plan, search, source, transform, validation, and fallback. Events describe observable system actions and counts, not private model reasoning. The client shows no speculative stage while a request is running; the final trace is built from the route and tool output that actually occurred.
+
+Failure responses use a stable envelope with `code`, safe `detail`, `requestId`, `retryable`, and a failed trace event. Detailed exceptions remain in server logs under the request ID. The browser keeps the last failed request in session state so retry commands replay its original query, compact context, history snapshot, and transient dataset. Failure-explanation questions are answered from this envelope without another API call.
+
+Model-generated widgets pass through a normalization boundary before the strict schema: columns are bounded and de-duplicated, rows are reshaped to the selected columns, text is length-limited, empty rows are removed, and nonnumeric chart proposals become tables. If normalization still cannot produce a valid widget, the request returns a traceable `cannot_answer` result while preserving existing dashboard state.
 
 ## Source policy
 

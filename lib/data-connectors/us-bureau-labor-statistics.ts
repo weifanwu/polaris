@@ -1,5 +1,6 @@
 import type { DataConnector } from "./types";
 import { hasSubnationalGeography } from "./query-capabilities";
+import { fetchWithTransientRetry } from "./http";
 import {
   isChineseQuery,
   requestedCalculation,
@@ -49,12 +50,11 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
     const endYear = new Date().getUTCFullYear();
     const startYear = Math.max(endYear - 10, endYear - Math.ceil(periods / 12) - 1);
     const apiUrl = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
-    const response = await fetch(apiUrl, {
+    const response = await fetchWithTransientRetry(apiUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ seriesid: [series.id], startyear: String(startYear), endyear: String(endYear) }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    }, { timeoutMs: 15_000 });
     if (!response.ok) throw new Error(`BLS API returned ${response.status}`);
     const payload = await response.json() as BlsResponse;
     if (payload.status !== "REQUEST_SUCCEEDED") throw new Error(`BLS API request failed: ${(payload.message ?? []).join(" ")}`);

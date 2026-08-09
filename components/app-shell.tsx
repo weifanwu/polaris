@@ -9,7 +9,7 @@ import { Sidebar } from "./sidebar";
 import { demoWidgets } from "@/lib/demo-data";
 import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
-import type { GenerateWidgetResult } from "@/lib/widget-schema";
+import type { AgentTrace, GenerateWidgetResult } from "@/lib/widget-schema";
 import type { ApiHealth, ChatMessage, DashboardWidget } from "@/types";
 
 const BREAKPOINT_COLS = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 } as const;
@@ -74,9 +74,70 @@ async function requestWidget(
       userData: userDataset,
     }),
   });
-  const payload = (await response.json()) as GenerateWidgetResult & { error?: string };
-  if (!response.ok) throw new Error(payload.error || "查询失败，请重试。");
+  const payload = (await response.json()) as GenerateWidgetResult & {
+    error?: string;
+    code?: string;
+    detail?: string;
+    requestId?: string;
+    retryable?: boolean;
+    trace?: AgentTrace;
+  };
+  if (!response.ok) {
+    throw new PolarisRequestError({
+      message: payload.error || "查询失败。",
+      code: payload.code || "request_failed",
+      detail: payload.detail,
+      requestId: payload.requestId,
+      retryable: payload.retryable ?? false,
+      trace: payload.trace,
+    });
+  }
   return payload;
+}
+
+type FailedRequest = {
+  query: string;
+  conversationContext: string;
+  history: ChatMessage[];
+  userDataset: UserDataset | null;
+  error: PolarisRequestError;
+};
+
+class PolarisRequestError extends Error {
+  code: string;
+  detail?: string;
+  requestId?: string;
+  retryable: boolean;
+  trace?: AgentTrace;
+
+  constructor(input: {
+    message: string;
+    code: string;
+    detail?: string;
+    requestId?: string;
+    retryable: boolean;
+    trace?: AgentTrace;
+  }) {
+    super(input.message);
+    this.name = "PolarisRequestError";
+    this.code = input.code;
+    this.detail = input.detail;
+    this.requestId = input.requestId;
+    this.retryable = input.retryable;
+    this.trace = input.trace;
+  }
+}
+
+const RETRY_PATTERN = /^(?:重试|再试(?:一次)?|重来|重新试|retry|try again)[呢吧.!！?？\s]*$/i;
+const EXPLAIN_FAILURE_PATTERN = /(?:为什么|为何|怎么).*(?:失败|错误)|(?:失败|错误).*(?:原因|什么)|what happened|why.*(?:fail|error)/i;
+
+function explainFailure(failure: FailedRequest) {
+  const error = failure.error;
+  const identity = error.requestId ? `错误编号 ${error.requestId}。` : "";
+  const nextStep = error.retryable
+    ? "这类错误可以重试；发送“重试”会重放原始请求，不会把“重试”当成新数据问题。"
+    : "原始请求已保留，但建议先按错误详情修正后再试。";
+  return `上一次失败不是数据结论，而是 ${error.code}：${error.message}${error.detail ? ` ${error.detail}` : ""} ${identity}${nextStep}`.trim();
 }
 
 export function AppShell() {
@@ -89,7 +150,8 @@ export function AppShell() {
   );
   const [query, setQuery] = useState("");
   const [userDataset, setUserDataset] = useState<UserDataset | null>(null);
-  const [loadingStage, setLoadingStage] = useState<"searching" | "structuring" | null>(null);
+  const [loadingStage, setLoadingStage] = useState<"working" | "analyzing" | null>(null);
+  const [lastFailedRequest, setLastFailedRequest] = useState<FailedRequest | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
   const [refreshErrors, setRefreshErrors] = useState<Record<string, string>>({});
   const [navCollapsed, setNavCollapsed] = useState(false);
@@ -130,26 +192,51 @@ export function AppShell() {
   }, []);
 
   const submit = useCallback(async () => {
-    const cleanQuery = query.trim() || (userDataset ? "Analyze this dataset and create the most useful visualization." : "");
+    const typedQuery = query.trim();
+    if (EXPLAIN_FAILURE_PATTERN.test(typedQuery) && lastFailedRequest && !loadingStage) {
+      const explanationMessages: ChatMessage[] = [
+        { id: crypto.randomUUID(), role: "user", content: typedQuery },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: explainFailure(lastFailedRequest),
+          tone: "error",
+          trace: lastFailedRequest.error.trace,
+        },
+      ];
+      setMessages((current) => [...current, ...explanationMessages].slice(-20));
+      setQuery("");
+      return;
+    }
+
+    const retrying = RETRY_PATTERN.test(typedQuery) && Boolean(lastFailedRequest);
+    const cleanQuery = retrying
+      ? lastFailedRequest!.query
+      : typedQuery || (userDataset ? "Analyze this dataset and create the most useful visualization." : "");
     if (!cleanQuery || loadingStage) return;
+
+    const requestContext = retrying ? lastFailedRequest!.conversationContext : userDataset ? "" : conversationContext;
+    const requestHistory = retrying ? lastFailedRequest!.history : messages;
+    const requestDataset = retrying ? lastFailedRequest!.userDataset : userDataset;
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content: userDataset ? `${cleanQuery}\n\nAttached data: ${userDataset.name}` : cleanQuery,
+      content: retrying
+        ? `重试上一次请求：${cleanQuery}`
+        : requestDataset ? `${cleanQuery}\n\nAttached data: ${requestDataset.name}` : cleanQuery,
     };
     setMessages((current) => [...current, userMessage].slice(-20));
     setQuery("");
-    setLoadingStage(userDataset ? "structuring" : "searching");
-    const stageTimer = window.setTimeout(() => setLoadingStage("structuring"), 2_200);
+    setLoadingStage(requestDataset ? "analyzing" : "working");
 
     try {
       const result = await requestWidget(
         cleanQuery,
-        userDataset ? "" : conversationContext,
-        messages,
+        requestContext,
+        requestHistory,
         false,
-        userDataset,
+        requestDataset,
       );
       if (typeof result.conversationContext === "string") {
         setConversationContext(result.conversationContext);
@@ -161,11 +248,29 @@ export function AppShell() {
           content: result.message,
           tone: result.status === "cannot_answer" ? "error" : "normal",
           usage: result.usage,
+          trace: result.trace,
         };
         setMessages((current) => [
           ...current,
           assistantMessage,
         ].slice(-20));
+        if (result.status === "cannot_answer") {
+          setLastFailedRequest({
+            query: cleanQuery,
+            conversationContext: requestContext,
+            history: requestHistory,
+            userDataset: requestDataset,
+            error: new PolarisRequestError({
+              message: result.message,
+              code: "analysis_incomplete",
+              detail: "The run completed without a renderable, sufficiently verified widget.",
+              retryable: true,
+              trace: result.trace,
+            }),
+          });
+        } else {
+          setLastFailedRequest(null);
+        }
         return;
       }
 
@@ -178,28 +283,44 @@ export function AppShell() {
         content: result.message || `Created “${widget.title}”.`,
         widgetId: widget.id,
         usage: result.usage,
+        trace: result.trace,
       };
       setMessages((current) => [
         ...current,
         assistantMessage,
       ].slice(-20));
-      if (userDataset) setUserDataset(null);
+      setLastFailedRequest(null);
+      if (requestDataset) setUserDataset(null);
     } catch (error) {
+      const failure = error instanceof PolarisRequestError
+        ? error
+        : new PolarisRequestError({
+          message: error instanceof Error ? error.message : "查询失败。",
+          code: "client_error",
+          retryable: true,
+        });
+      setLastFailedRequest({
+        query: cleanQuery,
+        conversationContext: requestContext,
+        history: requestHistory,
+        userDataset: requestDataset,
+        error: failure,
+      });
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: error instanceof Error ? error.message : "查询失败，请重试。",
+        content: `${failure.message}${failure.requestId ? ` 错误编号：${failure.requestId}。` : ""}${failure.retryable ? " 可以发送“重试”重放原始请求。" : ""}`,
         tone: "error",
+        trace: failure.trace,
       };
       setMessages((current) => [
         ...current,
         assistantMessage,
       ].slice(-20));
     } finally {
-      window.clearTimeout(stageTimer);
       setLoadingStage(null);
     }
-  }, [conversationContext, loadingStage, messages, query, userDataset]);
+  }, [conversationContext, lastFailedRequest, loadingStage, messages, query, userDataset]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
@@ -250,6 +371,7 @@ export function AppShell() {
     setWidgets(demoWidgets);
     setLayouts(layoutsForWidgets(demoWidgets));
     setConversationContext("");
+    setLastFailedRequest(null);
     setMessages([{
       id: crypto.randomUUID(),
       role: "assistant",
@@ -263,11 +385,13 @@ export function AppShell() {
     setMessages([]);
     setConversationContext("");
     setRefreshErrors({});
+    setLastFailedRequest(null);
   }, []);
 
   const clearConversation = useCallback(() => {
     setMessages([]);
     setConversationContext("");
+    setLastFailedRequest(null);
   }, []);
 
   return (

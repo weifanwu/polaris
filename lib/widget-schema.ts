@@ -73,6 +73,21 @@ export const widgetSpecSchema = z
     }
   });
 
+export const agentTraceEventSchema = z.object({
+  id: z.string().min(1).max(120),
+  kind: z.enum(["route", "plan", "search", "source", "transform", "validation", "fallback"]),
+  status: z.enum(["complete", "warning", "failed"]),
+  title: z.string().min(1).max(120),
+  detail: z.string().max(500),
+  durationMs: z.number().int().nonnegative().optional(),
+});
+
+export const agentTraceSchema = z.object({
+  mode: z.enum(["connector", "research_harness", "web_search", "user_data", "intent", "fallback"]),
+  summary: z.string().min(1).max(240),
+  events: z.array(agentTraceEventSchema).max(30),
+});
+
 export const generateWidgetResultSchema = z.object({
   status: z.enum(["success", "needs_clarification", "cannot_answer"]),
   message: z.string().min(1).max(500),
@@ -87,6 +102,7 @@ export const generateWidgetResultSchema = z.object({
       modelCalls: z.number().int().nonnegative(),
     })
     .optional(),
+  trace: agentTraceSchema.optional(),
 });
 
 export const intentResolutionSchema = z.object({
@@ -124,3 +140,4 @@ export type WidgetSpec = z.infer<typeof widgetSpecSchema>;
 export type GenerateWidgetResult = z.infer<typeof generateWidgetResultSchema>;
 export type ModelWidgetResult = z.infer<typeof modelWidgetResultSchema>;
 export type RequestUsage = NonNullable<GenerateWidgetResult["usage"]>;
+export type AgentTrace = z.infer<typeof agentTraceSchema>;

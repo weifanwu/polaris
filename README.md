@@ -33,6 +33,7 @@ The repository is publicly available for personal, educational, research, and ot
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Data connectors](#data-connectors)
+- [Agent observability and recovery](#agent-observability-and-recovery)
 - [Cost-aware model routing](#cost-aware-model-routing)
 - [Data integrity](#data-integrity)
 - [Technology](#technology)
@@ -89,6 +90,7 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Checks requested dimensions before accepting a connector match; industry, occupation, geography, and frequency qualifiers cannot be silently discarded.
 - Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
 - Automatically falls back to the bounded research agent when a connector is unsupported, unmatched, or unavailable.
+- Retries transient connector timeouts, rate limits, and 5xx responses once with a bounded delay; permanent 4xx responses are never retried.
 - Searches for the exact requested slice first, then honestly labelled proxy measures; it never relabels a national aggregate as an industry or occupation result.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
 
@@ -131,6 +133,8 @@ Every agent response reports:
 - Web Search calls.
 
 This makes prompt growth, cache behavior, and expensive research paths visible during normal use.
+
+Each completed response also includes an expandable **Run Trace**. It reports the operational route actually used—official connector, intent resolver, Web Search, multi-series research harness, user-data analysis, or fallback—followed by source counts, transformations, validation coverage, warnings, and tool durations when available. It does not expose private model reasoning or fabricate progress steps.
 
 ## How it works
 
@@ -193,6 +197,19 @@ Connectors are tried in a fixed registry and must return the same validated `Wid
 The Canadian catalog uses Statistics Canada vector identifiers, which remain stable across table updates. A connector request sends only the selected vectors and requested number of periods to the publisher; full tables and long data histories are not sent through a language model. Up to five regions or countries can be aligned in one widget, and unsupported mixed-source requests fall through to bounded research instead of returning a misleading partial comparison.
 
 Connector matching is exact with respect to requested dimensions. For example, a request for software-industry unemployment cannot fall back to Canada's overall unemployment rate. Statistics Canada publishes monthly industry unemployment only for broad NAICS groups; Polaris identifies that data gap and suggests an explicitly labelled proxy such as Professional, scientific and technical services [54], rather than generating a falsely specific chart.
+
+## Agent observability and recovery
+
+Polaris separates visible operational telemetry from private model reasoning:
+
+- While a request is in flight, the interface displays only a truthful neutral state; it never claims that Web Search or validation is running until the server reports that it actually occurred.
+- After completion, the Run Trace lists routing, planning, searches, cited-source collection, deterministic transformations, validation, and fallback decisions.
+- API failures return a safe error code, a request ID for server-log correlation, a retryability flag, and a failed trace step. Provider secrets and raw internal exceptions are not exposed.
+- The browser retains the most recent failed request in session memory. Sending `重试`, `retry`, or `try again` replays the original query, compact context, and attached transient dataset instead of treating the retry phrase as a new research question.
+- Asking why the previous run failed is answered from the stored failure metadata without another model call or Web Search.
+- Model-proposed rows and columns are normalized into the bounded widget contract before validation, so harmless overlong labels, extra cells, duplicate keys, or a nonnumeric chart proposal fail safely instead of becoming a generic server error.
+
+Run traces are deliberately auditable summaries of system actions, not chain-of-thought transcripts.
 
 ## Cost-aware model routing
 

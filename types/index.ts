@@ -1,6 +1,6 @@
-import type { RequestUsage, WidgetSpec } from "@/lib/widget-schema";
+import type { AgentTrace, RequestUsage, WidgetSpec } from "@/lib/widget-schema";
 
-export type { RequestUsage, WidgetSpec };
+export type { AgentTrace, RequestUsage, WidgetSpec };
 
 export type DashboardWidget = WidgetSpec & {
   isDemo?: boolean;
@@ -13,6 +13,7 @@ export type ChatMessage = {
   widgetId?: string;
   tone?: "normal" | "error";
   usage?: RequestUsage;
+  trace?: AgentTrace;
 };
 
 export type ApiHealth = {

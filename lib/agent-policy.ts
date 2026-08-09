@@ -39,6 +39,12 @@ export function resolveDeterministicFollowUp(query: string, conversationContext:
     return `${conversationContext.slice(0, 420)}; confirmed scope: software occupation`.slice(0, 500);
   }
 
+  const acceptsOfficialWealthGroups = /^(?:接受|确认|可以|同意|accept|confirmed?)[。，,；;:·\s]/i.test(cleanQuery)
+    && /(?:DHEA|财富|净资产|wealth)/i.test(`${conversationContext} ${cleanQuery}`);
+  if (acceptsOfficialWealthGroups) {
+    return `${conversationContext.slice(0, 280)}; confirmed: use the latest available DHEA official wealth groupings exactly as published; preserve official names and definitions; calculate each group's net-worth share; explain differences from standard wealth quintiles; do not split, merge, infer, or normalize nonexistent groups.`.slice(0, 500);
+  }
+
   const confirmsCurrentRange = /^(?:当前|现在|到现在|对的|是的|没错|current|yes|correct)$/i.test(cleanQuery);
   const hasRelativeRange = /(?:最近|过去|近|last|past).{0,16}(?:个?月|年|months?|years?)/i.test(conversationContext);
   if (confirmsCurrentRange && hasRelativeRange) {

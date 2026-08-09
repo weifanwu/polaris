@@ -20,6 +20,7 @@ import {
 import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { listWorksheetNames } from "../lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, parseUserDataset } from "../lib/user-dataset";
+import { fetchWithTransientRetry } from "../lib/data-connectors/http";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { strToU8, zipSync } from "fflate";
 
@@ -108,6 +109,27 @@ assert.equal(
   true,
   "cost telemetry and compact context should pass",
 );
+assert.equal(
+  generateWidgetResultSchema.safeParse({
+    status: "cannot_answer",
+    message: "The run stopped safely.",
+    widget: null,
+    trace: {
+      mode: "fallback",
+      summary: "A safe operational trace.",
+      events: [{
+        id: "trace-1",
+        kind: "validation",
+        status: "failed",
+        title: "Widget validation failed",
+        detail: "No incomplete widget was saved.",
+        durationMs: 120,
+      }],
+    },
+  }).success,
+  true,
+  "operational traces should pass the response contract",
+);
 
 assert.equal(
   widgetSpecSchema.safeParse({
@@ -155,6 +177,14 @@ assert.match(
   resolveDeterministicFollowUp("当前", "加拿大失业率；最近10年；按月") ?? "",
   /latest available observation/,
   "current should confirm the end of a relative rolling range",
+);
+assert.match(
+  resolveDeterministicFollowUp(
+    "接受。直接采用最新季度 DHEA 可获得的最接近官方财富分组，不要推算。",
+    "分析加拿大最新家庭财富分布；询问是否接受 DHEA 官方分组",
+  ) ?? "",
+  /preserve official names and definitions/,
+  "DHEA grouping acceptance should be merged deterministically instead of asking again",
 );
 assert.equal(
   isCompleteQualifiedDataRequest("加拿大IT行业最近10年月度失业率"),
@@ -231,4 +261,27 @@ assert.deepEqual(listWorksheetNames(workbook.buffer as ArrayBuffer), ["Monthly P
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, user-data, and agent-policy tests passed (37 cases).");
+const originalFetch = globalThis.fetch;
+try {
+  let transientAttempts = 0;
+  globalThis.fetch = async () => {
+    transientAttempts += 1;
+    return new Response("", { status: transientAttempts === 1 ? 503 : 200 });
+  };
+  const recovered = await fetchWithTransientRetry("https://example.com/data", {}, { timeoutMs: 100, attempts: 2 });
+  assert.equal(recovered.status, 200, "transient connector failures should receive one bounded retry");
+  assert.equal(transientAttempts, 2, "bounded retry should stop after recovery");
+
+  let permanentAttempts = 0;
+  globalThis.fetch = async () => {
+    permanentAttempts += 1;
+    return new Response("", { status: 404 });
+  };
+  const permanentFailure = await fetchWithTransientRetry("https://example.com/missing", {}, { timeoutMs: 100, attempts: 2 });
+  assert.equal(permanentFailure.status, 404, "non-transient connector responses should be returned immediately");
+  assert.equal(permanentAttempts, 1, "4xx connector responses must not be retried");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+console.log("Polaris schema, connector, user-data, and agent-policy tests passed (43 cases).");
