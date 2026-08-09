@@ -123,6 +123,18 @@ For a comparison whose rows live across different publishers, Polaris first crea
 
 CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and may only calculate from supplied cells. Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
 
+## Dashboard context envelope
+
+The dashboard is part of the agent's workspace, but sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from all current widgets. Ordinary questions receive a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the dashboard, existing charts, or tables above may expand to 4,200 characters and add each widget's bounded summary plus first/latest row previews. Full raw tables are never included automatically.
+
+The server independently enforces the 4,200-character ceiling and places the snapshot in a delimited developer message that labels it inert, user-controlled metadata. Intent resolution may use it to resolve phrases such as "the chart above"; research may use it to preserve continuity. New factual claims still require connector or Web Search evidence.
+
+## Refresh contract
+
+Refresh is a data synchronization operation, not a second generation request. The browser sends a small identity descriptor containing the existing visualization, columns, units, acquisition method, source name, coverage end, and publisher domains. Official widgets are refreshed only through the same connector; a connector failure never falls through to a different dataset. Researched widgets receive an explicit source-refresh instruction and must retain at least one original publisher domain.
+
+The returned candidate passes deterministic guards before state changes: visualization, column count/order, labels, types, units, source route, publisher identity, and non-regressing coverage. Polaris then compares a canonical fingerprint of columns and rows while ignoring IDs, timestamps, summaries, and verification times. Identical data produces an "unchanged" notice and no write. New periods or historical revisions update the existing widget in place. Incompatible, unavailable, or older candidates are rejected while the existing data remains visible.
+
 ## Observability and failure recovery
 
 Every completed API result may include a bounded `AgentTrace` containing typed operational events: route, plan, search, source, transform, validation, and fallback. Events describe observable system actions and counts, not private model reasoning. The client shows no speculative stage while a request is running; the final trace is built from the route and tool output that actually occurred.

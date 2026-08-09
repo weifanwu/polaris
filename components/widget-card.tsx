@@ -22,7 +22,7 @@ import { MetricWidget } from "./widgets/metric-widget";
 type Props = {
   widget: DashboardWidget;
   refreshing: boolean;
-  refreshError?: string;
+  refreshNotice?: { tone: "success" | "neutral" | "error"; message: string };
   focused: boolean;
   onDelete: () => void;
   onRefresh: () => void;
@@ -45,7 +45,7 @@ function WidgetContent({ widget }: { widget: DashboardWidget }) {
 export function WidgetCard({
   widget,
   refreshing,
-  refreshError,
+  refreshNotice,
   focused,
   onDelete,
   onRefresh,
@@ -106,7 +106,7 @@ export function WidgetCard({
             onClick={onRefresh}
             disabled={refreshing || isUserData}
             aria-label={`Refresh ${widget.title}`}
-            title={isUserData ? "Re-upload the source data to refresh" : "Refresh with original question"}
+            title={isUserData ? "Re-upload the source data to refresh" : "Check the original source for new or revised data"}
           >
             <RefreshCw size={15} className={refreshing ? "spin" : undefined} />
           </button>
@@ -167,7 +167,7 @@ export function WidgetCard({
           }).format(new Date(widget.generatedAt))}
         </time>
       </footer>
-      {refreshError ? <div className="widget-error">{refreshError}</div> : null}
+      {refreshNotice ? <div className={`widget-refresh-notice ${refreshNotice.tone}`}>{refreshNotice.message}</div> : null}
     </article>
   );
 }
