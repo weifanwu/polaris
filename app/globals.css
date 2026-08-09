@@ -350,6 +350,18 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .trace-body li small { margin-top: 3px; color: #4f6069; font-size: 7px; }
 .trace-body footer { margin-top: 7px; padding-top: 7px; color: #4f6069; border-top: 1px dashed #26333d; font-size: 7px; line-height: 1.4; }
 .focus-widget { display: inline-flex; align-items: center; gap: 3px; margin-top: 8px; padding: 0; color: var(--cyan); border: 0; background: none; font-size: 10px; cursor: pointer; }
+.recovery-proposal { margin-top: 20px; padding: 14px; border: 1px solid rgba(34, 211, 238, .28); border-radius: 12px; background: linear-gradient(145deg, rgba(12, 48, 55, .52), rgba(12, 19, 25, .96)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025); }
+.recovery-proposal-kicker { display: flex; align-items: center; gap: 6px; color: var(--cyan); }
+.recovery-proposal-kicker span { font-size: 7px; font-weight: 700; letter-spacing: .16em; }
+.recovery-proposal h3 { margin: 10px 0 7px; color: #e6f7f9; font-size: 13px; line-height: 1.35; }
+.recovery-proposal > p { margin: 0; color: #a7bac2; font-size: 10px; line-height: 1.55; }
+.recovery-proposal-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.recovery-proposal-meta span { padding: 4px 6px; color: #7f9aa3; border: 1px solid rgba(80, 122, 132, .26); border-radius: 999px; background: rgba(5, 14, 18, .44); font-size: 7px; text-transform: capitalize; }
+.recovery-proposal-actions { display: flex; gap: 7px; margin-top: 12px; }
+.recovery-proposal-actions button { min-height: 31px; padding: 7px 10px; color: #9aabb2; border: 1px solid #30424a; border-radius: 8px; background: rgba(10, 16, 20, .7); font-size: 9px; cursor: pointer; }
+.recovery-proposal-actions button.primary { flex: 1; color: #041014; border-color: var(--cyan); background: var(--cyan); font-weight: 700; }
+.recovery-proposal-actions button:hover { border-color: #4f6c76; }
+.recovery-proposal-actions button.primary:hover { background: #67e8f9; }
 .agent-progress { margin-top: 22px; display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid rgba(34, 211, 238, .16); border-radius: 10px; background: rgba(34, 211, 238, .04); }
 .progress-orbit { width: 30px; height: 30px; display: grid; place-items: center; color: var(--cyan); border-radius: 50%; background: var(--cyan-soft); animation: breathe 1.3s ease-in-out infinite; }
 .agent-progress div:last-child { display: flex; flex-direction: column; }

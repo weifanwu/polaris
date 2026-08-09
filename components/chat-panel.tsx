@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Activity, ArrowUp, Bot, ChevronDown, ChevronRight, FileSpreadsheet, PanelRightClose, PanelRightOpen, Paperclip, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { listWorksheetNames, readWorksheet } from "@/lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, MAX_USER_FILE_BYTES, userDatasetSizeLabel, type UserDataset } from "@/lib/user-dataset";
-import type { ChatMessage } from "@/types";
+import type { ChatMessage, RecoveryProposal } from "@/types";
 
 export const examplePrompts = [
   "Compare Canada and Ontario monthly unemployment over the last 10 years",
@@ -20,11 +20,14 @@ type Props = {
   userDataset: UserDataset | null;
   dashboardWidgetCount: number;
   dashboardName: string;
+  recoveryProposal: RecoveryProposal | null;
   onToggle: () => void;
   onClear: () => void;
   onQueryChange: (query: string) => void;
   onDatasetChange: (dataset: UserDataset | null) => void;
   onSubmit: () => void;
+  onApproveRecovery: () => void;
+  onDismissRecovery: () => void;
   onFocusWidget: (id: string) => void;
 };
 
@@ -36,11 +39,14 @@ export function ChatPanel({
   userDataset,
   dashboardWidgetCount,
   dashboardName,
+  recoveryProposal,
   onToggle,
   onClear,
   onQueryChange,
   onDatasetChange,
   onSubmit,
+  onApproveRecovery,
+  onDismissRecovery,
   onFocusWidget,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,7 +111,7 @@ export function ChatPanel({
       top: scrollArea.scrollHeight,
       behavior: messages.length > 1 ? "smooth" : "auto",
     });
-  }, [loadingStage, messages]);
+  }, [loadingStage, messages, recoveryProposal]);
 
   if (collapsed) {
     return (
@@ -124,7 +130,7 @@ export function ChatPanel({
           <button
             className="icon-button danger"
             onClick={onClear}
-            disabled={messages.length === 0 || Boolean(loadingStage)}
+            disabled={(messages.length === 0 && !recoveryProposal) || Boolean(loadingStage)}
             aria-label="Clear conversation"
             title="Clear conversation"
           >
@@ -175,6 +181,23 @@ export function ChatPanel({
             ))}
           </div>
         )}
+
+        {recoveryProposal && !loadingStage ? (
+          <section className="recovery-proposal" aria-label="Recommended chart alternative">
+            <div className="recovery-proposal-kicker"><Sparkles size={13} /><span>READY ALTERNATIVE</span></div>
+            <h3>{recoveryProposal.title}</h3>
+            <p>{recoveryProposal.description}</p>
+            <div className="recovery-proposal-meta">
+              <span>{recoveryProposal.widget.rows.length} cached rows</span>
+              <span>{recoveryProposal.widget.dataQuality?.frequency ?? "verified"}</span>
+              <span>0 new searches after approval</span>
+            </div>
+            <div className="recovery-proposal-actions">
+              <button className="primary" onClick={onApproveRecovery}>{recoveryProposal.approvalLabel}</button>
+              <button onClick={onDismissRecovery}>Dismiss</button>
+            </div>
+          </section>
+        ) : null}
 
         {loadingStage ? (
           <div className="agent-progress">

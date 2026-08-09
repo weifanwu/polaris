@@ -47,6 +47,7 @@ Polaris treats data acquisition, identity resolution, transformation, analysis, 
 - Preserve follow-up decisions through compact conversation memory, including metric, geography, frequency, units, and previously selected definitions.
 - Create, rename, switch, and delete focused dashboards; every dashboard owns its widgets, layout, conversation history, and agent context.
 - Research fragmented comparison series independently, align dates deterministically, and preserve missing observations as gaps.
+- When the exact chart is not defensible, prepare a cited alternative from the same research run; one-click or natural-language approval renders the cached result with zero additional searches or model calls.
 - Produce professional LLM analysis grounded in deterministic evidence: dated peaks and troughs, largest adjacent-period moves, recent momentum, cross-series spreads, hypotheses, coverage, and causal limits.
 - Mark explicitly requested interpolated values as `unverified`; observed and hypothetical cells are never visually conflated.
 - Drag, resize, expand, refresh, and remove dashboard widgets.
@@ -84,7 +85,10 @@ flowchart LR
   T --> V["Widget contract validation"]
   V --> E["Deterministic evidence packet"]
   E --> A["Bounded LLM Insight Engine"]
-  A --> D["Isolated dashboard workspace"]
+  A --> P{"Exact request preserved?"}
+  P -->|"yes"| D["Isolated dashboard workspace"]
+  P -->|"material alternative"| H["Cached proposal + approval"]
+  H --> D
   D --> X["Source-locked refresh"]
   X --> R
 ```
@@ -97,7 +101,8 @@ The acquisition route is selected in this order:
 4. Complex requests are decomposed into independently researchable series.
 5. Bounded Web Search is used when no structured route matches.
 6. A downloadable file discovered during research is passed into the file-input pipeline instead of being rejected as unreadable.
-7. Rows are normalized, transformed, provenance-checked, and validated before rendering.
+7. If incompatible official frequencies or scopes require a material change, a complete validated alternative is cached and presented for explicit approval.
+8. Approval renders the cached rows without repeating research; otherwise rows are normalized, transformed, provenance-checked, and validated before rendering.
 
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the connector contract and recovery design.
 
@@ -127,6 +132,12 @@ A Polaris workspace can contain up to 12 named dashboards. Each dashboard persis
 - source-locked refresh state for its widgets.
 
 Only the active dashboard is included in an agent request. An `Economy` dashboard therefore cannot leak its charts or conversation into a `Stocks` dashboard, while the active dashboard name itself provides a small subject hint even before its first widget is created. Existing single-dashboard browser storage migrates automatically into `My Dashboard`.
+
+## Executable recovery proposals
+
+`cannot_answer` is reserved for runs that cannot verify even a useful alternative. When the original chart is invalid but the same research run supports an honest substitute, Polaris returns a separate `needs_approval` state with a complete validated widget, sources, quality metadata, and a standalone replacement query. A common example is comparing a quarterly flow with an annual flow: Polaris may propose a common annual chart and sum verified quarters only when the measure is definitionally additive; it never manufactures monthly observations.
+
+The proposal is persisted inside the active dashboard, so switching dashboards or reloading the page does not lose the collected evidence. Users can approve with the action button or a short confirmation such as “go ahead,” “就这样画,” or “你觉得怎么好画就怎么画.” Approval is executed locally from the cached widget, reports `0` input tokens, `0` model calls, and `0` searches, and adds a Run Trace explaining exactly what was reused. A new unrelated request or dismissal clears the pending proposal.
 
 ## Official data connectors
 
@@ -191,6 +202,7 @@ While a request is running, the interface uses a neutral working state. It does 
 | Direct file analysis | `gpt-5.6-sol` | `gpt-5.6-sol` | 0 |
 | Direct web lookup | `gpt-5.6-terra` | `gpt-5.6-sol` | Up to 3 |
 | Fragmented multi-source research | `gpt-5.6-sol` planning + `gpt-5.6-terra` series workers | `gpt-5.6-sol` | Up to 6 |
+| Approved cached alternative | Deterministic browser state | Already completed | 0 |
 
 Stable prompt prefixes and cache keys improve cached-input reuse. Only the active dashboard contributes compact metadata and statistical fingerprints; full dashboard tables are never sent as ambient context. The LLM Insight Engine uses at most 18 representative rows plus deterministic statistics. Recent chat turns, conversation state, search context, file size, and model output are all bounded independently.
 
@@ -276,6 +288,7 @@ polaris/
 │   ├── insight-engine.ts    # Deterministic quantitative analysis
 │   ├── agent-policy.ts      # Memory, ambiguity, research, and cost policy
 │   ├── dashboard-context.ts # Bounded metadata and statistical fingerprints
+│   ├── recovery-proposal.ts # Cached alternative and approval contract
 │   ├── user-dataset.ts      # Upload and remote-file safety contract
 │   └── widget-schema.ts     # Rendering and provenance schemas
 ├── scripts/                 # Schema and live connector tests

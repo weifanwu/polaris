@@ -30,7 +30,12 @@ flowchart TD
     H --> I["Validate schema, units, gaps, and coverage"]
     I --> N["Deterministic evidence packet"]
     N --> L["Bounded LLM Insight Engine"]
-    L --> J["Compile ECharts option"]
+    L --> AP{"Material change required?"}
+    AP -->|"no"| J["Compile ECharts option"]
+    AP -->|"yes"| AC["Persist validated proposal in active dashboard"]
+    AC --> AU{"User approves?"}
+    AU -->|"yes: reuse cached rows"| J
+    AU -->|"no"| R
     J --> K["Interactive dashboard widget"]
 ```
 
@@ -134,6 +139,14 @@ The renderer never performs interpolation itself and does not force the y-axis t
 
 For a comparison whose rows live across different publishers, Polaris first creates a compact plan with one exact series per entity or geography. Each series is researched independently with its own source preference and small search budget. Application code then normalizes period labels, validates numeric cells, joins the union of verified dates, applies requested MoM/YoY calculations, and leaves absent cells empty. A partially populated comparison can therefore render honestly instead of failing because one publisher has gaps.
 
+The planner also owns an explicit approval boundary. If the requested series cannot be compared at the requested frequency or scope, it may select the closest honest common view—for example, annual net-migration flows when one publisher releases quarterly data and another annual data. It marks the plan `requiresApproval`, explains the transformation, and produces a standalone `proposedQuery`. Research still completes in the same run so the user can evaluate a concrete chart rather than a vague suggestion. Deterministic aggregation is allowed only when the measure is additive; stocks, rates, and indexes are never summed merely to force comparability.
+
+## Recovery proposal contract
+
+A `needs_approval` response is neither a clarification nor a failure. It must contain a complete schema-validated `RecoveryProposal`: proposal text, executable query, cited `WidgetSpec`, quality envelope, and creation timestamp. The browser stores this object only inside the active dashboard. No full table is sent back through the model on the next turn.
+
+The client recognizes bounded approval and dismissal phrases in addition to the explicit controls. Approval appends the cached widget directly, preserves its citations and gaps, advances compact conversation memory to the executable alternative, and records a zero-cost trace. It cannot trigger a fetch or model call. Any message that is not a clear approval or dismissal starts a normal new request and clears the stale proposal. This makes the handoff auditable while preventing accidental execution after the user materially changes the request.
+
 ## User-supplied data
 
 CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. PDFs are sent as base64 `input_file` content with low page-image detail by default; extracted text remains available while visual-token use is bounded. Direct HTTPS links to supported CSV, TSV, JSON, TXT, XLS/XLSX, and PDF files use `file_url`. When Web Search cites a direct downloadable file but cannot produce rows, Polaris performs a second bounded file-analysis call instead of declaring the file unreadable.
@@ -142,7 +155,7 @@ Raw uploads are not added to dashboard storage. The analysis route treats the da
 
 ## Multi-dashboard context envelope
 
-Each named dashboard is a separate agent workspace with its own widgets, responsive layouts, recent chat history, and compact conversation memory. The browser persists up to 12 dashboards and automatically migrates the legacy single-dashboard state. Switching dashboards changes all four together, so an economic workspace cannot leak context into a stock workspace.
+Each named dashboard is a separate agent workspace with its own widgets, responsive layouts, recent chat history, compact conversation memory, and pending recovery proposal. The browser persists up to 12 dashboards and automatically migrates the legacy single-dashboard state. Switching dashboards changes them together, so an economic workspace cannot leak context or an approval action into a stock workspace.
 
 Sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from only the active dashboard. Ordinary questions receive its name plus a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the active dashboard, existing charts, or tables above may expand to 4,200 characters and add a statistical fingerprint (latest, low, and high for up to three numeric series), bounded analysis, and first/latest row previews. Full raw tables are never included automatically.
 
@@ -159,6 +172,8 @@ The returned candidate passes deterministic guards before state changes: visuali
 Every completed API result may include a bounded `AgentTrace` containing typed operational events: route, plan, search, source, transform, validation, and fallback. Events describe observable system actions and counts, not private model reasoning. The client shows no speculative stage while a request is running; the final trace is built from the route and tool output that actually occurred.
 
 Failure responses use a stable envelope with `code`, safe `detail`, `requestId`, `retryable`, and a failed trace event. Detailed exceptions remain in server logs under the request ID. The browser keeps the last failed request in session state so retry commands replay its original query, compact context, history snapshot, and transient dataset. Failure-explanation questions are answered from this envelope without another API call.
+
+Source-backed alternatives do not use the failure envelope. They expose `needs_approval`, retain the fully validated widget, and add trace events for the comparability decision, searches, sources, transformation, and approval wait. The subsequent approval trace explicitly reports cached reuse and zero additional research.
 
 Model-generated widgets pass through a normalization boundary before the strict schema: columns are bounded and de-duplicated, rows are reshaped to the selected columns, text is length-limited, empty rows are removed, and nonnumeric chart proposals become tables. If normalization still cannot produce a valid widget, the request returns a traceable `cannot_answer` result while preserving existing dashboard state.
 

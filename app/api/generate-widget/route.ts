@@ -29,6 +29,7 @@ import { parseDashboardContext } from "@/lib/dashboard-context";
 import { parseRefreshContext, type RefreshContext } from "@/lib/widget-refresh";
 import { applyRequestedHypotheses } from "@/lib/hypothesis-data";
 import { buildInsightEvidencePacket, enrichWidgetInsights } from "@/lib/insight-engine";
+import { createRecoveryProposal } from "@/lib/recovery-proposal";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -74,7 +75,12 @@ Success criteria:
 - Satisfy every qualifier in the resolved request. Never replace an industry, occupation, geography, demographic group, or frequency with an aggregate merely because aggregate data is easier to find.
 - If the exact qualified series is unavailable, search for a credible adjacent or proxy measure before failing. Label any proxy explicitly in the title, subtitle, columns, and summary, and explain the scope difference.
 - Never label an aggregate chart as the requested subgroup. A national total is not a valid proxy for an industry, occupation, geography, demographic group, or category unless the user explicitly asks for that total.
-- Return cannot_answer only when fewer than two useful chart rows can be verified, no trustworthy source exists, or the result cannot be rendered honestly.
+- When the exact requested chart cannot be rendered but the retrieved evidence supports a useful alternative, return needs_approval with a complete source-backed widget containing that alternative. The message must state: why the requested shape is invalid, the exact proposed frequency/metric/transformation, actual coverage, and that approval will reuse these already collected rows without another search.
+- Prefer a comparable lower frequency over interpolation. Example: if one official net-migration series is quarterly and another annual, propose annual comparison; aggregate verified quarterly flow observations by calendar-year sum only when the source definition makes summation valid.
+- A needs_approval widget must contain only values already retrieved in this run or deterministic arithmetic from them. Never put placeholder, recalled, estimated, or future values in a proposal.
+- Return cannot_answer only when fewer than two useful alternative rows can be verified, no trustworthy source exists, or no honest alternative can be rendered.
+
+For proposedQuery: on success, repeat the executable resolved request; on needs_approval, write the exact standalone alternative request that the cached widget answers; otherwise return the current resolved request.
 
 Output only the required structured result. Every success must contain a non-empty widget.`;
 
@@ -97,6 +103,8 @@ Rules:
 - Calculations such as growth, change, share, ranking, averages, and outlier detection must be reproducible from supplied values.
 - Do not spend the summary repeating the title, row count, or a single first-to-last difference. Prefer quantified turning points, recent-window changes, comparisons, and limitations.
 - Use a table when the dataset cannot be honestly represented as a chart.
+
+For proposedQuery, repeat the executable analysis request. This route should not normally request approval.
 
 Output only the required structured result. Every success must contain a non-empty widget.`;
 
@@ -145,6 +153,9 @@ const researchPlanSchema = z.object({
   frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "annual", "mixed", "unknown"]),
   calculation: z.enum(["level", "mom", "yoy"]),
   comparabilityNote: z.string(),
+  requiresApproval: z.boolean(),
+  proposalMessage: z.string(),
+  proposedQuery: z.string(),
   series: z.array(z.object({
     label: z.string(),
     searchQuery: z.string(),
@@ -811,7 +822,15 @@ async function planComplexResearch(
       input: [
         {
           role: "developer",
-          content: `Create a compact execution plan for a fragmented data request. Split the request into one independently researchable series per entity or geography, with at most four series. Preserve exact scopes such as GTA versus City of Toronto. Search queries should use canonical English metric names and likely source identifiers. Plan raw level values; calculation says whether Polaris should transform them after alignment. Prefer line charts for time series. Record comparability limitations, but do not search or invent numbers.`,
+          content: `Create a compact execution plan for a fragmented data request. Split the request into one independently researchable series per entity or geography, with at most four series. Preserve exact scopes such as GTA versus City of Toronto. Search queries should use canonical English metric names and likely source identifiers. Plan raw level values; calculation says whether Polaris should transform them after alignment. Prefer line charts for time series. Record comparability limitations, but do not search or invent numbers.
+
+Approval contract:
+- Keep requiresApproval false when the exact requested chart is feasible.
+- When official series are published at incompatible frequencies or scopes, choose the most informative honest common alternative and set requiresApproval true. Prefer a common lower published frequency over interpolation: quarterly plus annual flow series should become an annual comparison, with verified quarters summed only when that flow definition is additive.
+- Any material change to frequency, metric, geography, population, or calculation requires approval.
+- proposalMessage must explain why the original chart is invalid, precisely what will change, what verified coverage is expected, and that approving reuses the collected data without another search.
+- proposedQuery must be a standalone executable request for the alternative. When approval is not required, it must equal the resolved request.
+- Never propose interpolation, synthetic monthly values, or a misleading proxy.`,
         },
         ...(dashboardContext ? [{ role: "developer" as const, content: dashboardContextInstruction(dashboardContext) }] : []),
         ...(refreshContext ? [{ role: "developer" as const, content: refreshInstruction(refreshContext) }] : []),
@@ -854,6 +873,7 @@ async function researchOneSeries(
 - Use period labels in sortable ISO form, preferably YYYY-MM for monthly data.
 - Values must be plain numeric strings without currency symbols or thousands separators.
 - A value may be reconstructed only by deterministic arithmetic from retrieved source inputs, such as a transaction-count-weighted aggregate. Explain the formula and affected periods in notes.
+- Follow the plan's target frequency. For an annual flow target, calendar-year sums of verified quarterly flows are allowed when the source definition is additive; never sum or average stocks, rates, or indexes without a valid definition.
 - Keep the requested geographic and metric scope exact. If a source has a different scope, disclose it and do not silently relabel it.
 - Do not reject the whole comparison because this one series is incomplete.`,
         },
@@ -915,6 +935,9 @@ async function assembleResearchWidget(
   conversationContext = "",
   history: ConversationTurn[] = [],
 ) {
+  const effectiveQuery = plan.requiresApproval
+    ? plan.proposedQuery.trim().slice(0, 500) || query
+    : query;
   const boundedSeries = results.slice(0, 4);
   let seriesMaps = boundedSeries.map((result) => {
     const values = new Map<string, string>();
@@ -985,7 +1008,7 @@ async function assembleResearchWidget(
     ],
     rows: periods.map((period) => ({ cells: [period, ...seriesMaps.map((values) => values.get(period) ?? "")] })),
     summary,
-    originalQuery: query,
+    originalQuery: effectiveQuery,
     sources,
     generatedAt: new Date().toISOString(),
     dataQuality: {
@@ -1002,18 +1025,52 @@ async function assembleResearchWidget(
     },
   });
   const insightResult = await applyProfessionalInsights(widgetBase, {
-    query,
+    query: effectiveQuery,
     dashboardContext,
     conversationContext,
     history,
   });
   const widget = insightResult.widget;
+  const totalUsage = addUsage(usage, insightResult.usage);
+  if (plan.requiresApproval) {
+    const description = plan.proposalMessage.trim()
+      || `The exact requested chart is not comparable. Polaris prepared “${widget.title}” from the verified observations already collected; approval will render it without another search.`;
+    const proposal = createRecoveryProposal(widget, description, effectiveQuery);
+    return Response.json(generateWidgetResultSchema.parse({
+      status: "needs_approval",
+      message: description.slice(0, 500),
+      widget: null,
+      recoveryProposal: proposal,
+      conversationContext: query,
+      usage: totalUsage,
+      trace: {
+        mode: "research_harness",
+        summary: "The exact chart was not comparable, so a source-backed alternative was prepared and cached for approval.",
+        events: [
+          traceEvent("route", "Research harness selected", "The request required multiple independently sourced series and deterministic alignment."),
+          ...(dashboardContext ? [traceEvent("plan", "Dashboard context loaded", `${dashboardContext.length.toLocaleString()} characters of bounded widget metadata were available for reference resolution.`)] : []),
+          traceEvent("plan", "Comparable alternative planned", `${effectiveQuery} ${plan.comparabilityNote}`.trim(), "warning"),
+          ...boundedSeries.map((result, index) => traceEvent(
+            "search",
+            `Researched ${result.plan.label}`,
+            `${result.searches.join("; ") || result.plan.searchQuery} · ${result.sources.length} cited source${result.sources.length === 1 ? "" : "s"} · ${seriesMaps[index].size} verified observation${seriesMaps[index].size === 1 ? "" : "s"}.`,
+            seriesMaps[index].size >= 2 ? "complete" : seriesMaps[index].size ? "warning" : "failed",
+            result.durationMs,
+          )),
+          traceEvent("source", "Alternative evidence retained", `${sources.length} cited sources and ${availablePoints}/${requestedPoints} verified numeric observations were cached with the proposal.`),
+          traceEvent("transform", "Alternative chart prepared", `${periods.length} ${plan.frequency} periods were aligned; missing values remain gaps and no interpolation was used.`, "warning"),
+          traceEvent("validation", "Waiting for approval", "The complete validated widget is stored in this dashboard. Approval will render it with zero additional searches and zero model calls.", "warning"),
+          insightResult.event,
+        ],
+      },
+    }));
+  }
   return Response.json(generateWidgetResultSchema.parse({
     status: "success",
     message: `Assembled ${boundedSeries.length} independently researched series with ${availablePoints}/${requestedPoints} verified observations. Missing periods were preserved as gaps.`,
     widget,
     conversationContext: query,
-    usage: addUsage(usage, insightResult.usage),
+    usage: totalUsage,
     trace: {
       mode: "research_harness",
       summary: `Planned, researched, aligned, and validated ${boundedSeries.length} independent series.`,
@@ -1411,6 +1468,52 @@ export async function POST(request: Request) {
 
     const usage = addUsage(accumulatedUsage, readUsage(response));
     const sources = collectSources(response);
+
+    if (parsed.status === "needs_approval" && parsed.widget && sources.length > 0) {
+      const proposedQuery = parsed.proposedQuery.trim().slice(0, 500)
+        || `${resolvedQuery}; use the source-backed alternative described in the proposal`;
+      const candidate = normalizeModelWidget(parsed.widget, proposedQuery, sources);
+      if (candidate) {
+        const widgetWithQualityBase = widgetSpecSchema.parse({
+          ...candidate,
+          originalQuery: proposedQuery,
+          dataQuality: buildWebDataQuality(candidate, proposedQuery),
+        });
+        const insightResult = await applyProfessionalInsights(widgetWithQualityBase, {
+          query: proposedQuery,
+          dashboardContext,
+          conversationContext,
+          history,
+        });
+        const proposal = createRecoveryProposal(
+          insightResult.widget,
+          parsed.message,
+          proposedQuery,
+        );
+        return Response.json(generateWidgetResultSchema.parse({
+          status: "needs_approval",
+          message: proposal.description,
+          widget: null,
+          recoveryProposal: proposal,
+          conversationContext: resolvedQuery,
+          usage: addUsage(usage, insightResult.usage),
+          trace: {
+            mode: "web_search",
+            summary: "The exact chart was not defensible, so Web Search prepared and cached a cited alternative for approval.",
+            events: [
+              traceEvent("route", "Web research selected", "No exact deterministic connector matched the resolved request."),
+              ...(dashboardContext ? [traceEvent("plan", "Dashboard context loaded", `${dashboardContext.length.toLocaleString()} characters of bounded widget metadata were available for reference resolution.`)] : []),
+              ...(harnessFallbackUsed ? [traceEvent("fallback", "Research harness fallback", "The multi-series harness did not complete, so Polaris used a consolidated research route.", "warning")] : []),
+              ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+              traceEvent("source", "Alternative evidence retained", `${sources.length} cited sources and ${proposal.widget.dataQuality?.availablePoints ?? 0} verified numeric observations were cached with the proposal.`),
+              traceEvent("transform", "Alternative chart prepared", `${proposal.widget.rows.length} rows and ${proposal.widget.columns.length} columns answer the proposed request: ${proposedQuery}`, "warning"),
+              traceEvent("validation", "Waiting for approval", "The validated widget is stored in this dashboard. Approval will render it with zero additional searches and zero model calls.", "warning"),
+              insightResult.event,
+            ],
+          },
+        }));
+      }
+    }
 
     if (parsed.status !== "success" || !parsed.widget || sources.length === 0) {
       const downloadable = sources

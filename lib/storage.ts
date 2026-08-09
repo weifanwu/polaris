@@ -1,5 +1,6 @@
 import type { ResponsiveLayouts } from "react-grid-layout";
-import type { ChatMessage, DashboardWidget } from "@/types";
+import { recoveryProposalSchema } from "@/lib/widget-schema";
+import type { ChatMessage, DashboardWidget, RecoveryProposal } from "@/types";
 
 const LEGACY_STORAGE_KEY = "polaris-dashboard:v1";
 const WORKSPACE_STORAGE_KEY = "polaris-workspace:v2";
@@ -12,6 +13,7 @@ export type StoredDashboard = {
   layouts: ResponsiveLayouts;
   messages: ChatMessage[];
   conversationContext: string;
+  pendingRecovery: RecoveryProposal | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -31,6 +33,7 @@ export const emptyDashboard: StoredDashboard = {
   layouts: {},
   messages: [],
   conversationContext: "",
+  pendingRecovery: null,
   createdAt: INITIAL_TIMESTAMP,
   updatedAt: INITIAL_TIMESTAMP,
 };
@@ -107,6 +110,9 @@ function sanitizeDashboard(value: unknown, fallbackName: string): StoredDashboar
       typeof parsed.conversationContext === "string" && !isLoopingSoftwareContext(parsed.conversationContext)
         ? parsed.conversationContext.slice(0, 500)
         : "",
+    pendingRecovery: recoveryProposalSchema.safeParse(parsed.pendingRecovery).success
+      ? recoveryProposalSchema.parse(parsed.pendingRecovery)
+      : null,
     createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : timestamp,
     updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : timestamp,
   };
@@ -171,6 +177,7 @@ export function saveWorkspace(state: StoredWorkspace) {
         name: normalizeDashboardName(dashboard.name),
         messages: dashboard.messages.slice(-20),
         conversationContext: dashboard.conversationContext.slice(0, 500),
+        pendingRecovery: dashboard.pendingRecovery,
       })),
     } satisfies StoredWorkspace),
   );

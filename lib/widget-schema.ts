@@ -98,10 +98,21 @@ export const agentTraceSchema = z.object({
   events: z.array(agentTraceEventSchema).max(30),
 });
 
+export const recoveryProposalSchema = z.object({
+  id: z.string().min(1).max(120),
+  title: z.string().min(1).max(120),
+  description: z.string().min(1).max(500),
+  approvalLabel: z.string().min(1).max(80),
+  proposedQuery: z.string().min(1).max(500),
+  widget: widgetSpecSchema,
+  createdAt: z.string().datetime(),
+});
+
 export const generateWidgetResultSchema = z.object({
-  status: z.enum(["success", "needs_clarification", "cannot_answer"]),
+  status: z.enum(["success", "needs_clarification", "needs_approval", "cannot_answer"]),
   message: z.string().min(1).max(500),
   widget: widgetSpecSchema.nullable(),
+  recoveryProposal: recoveryProposalSchema.nullable().optional(),
   conversationContext: z.string().max(500).optional(),
   usage: z
     .object({
@@ -113,6 +124,21 @@ export const generateWidgetResultSchema = z.object({
     })
     .optional(),
   trace: agentTraceSchema.optional(),
+}).superRefine((result, ctx) => {
+  if (result.status === "needs_approval" && !result.recoveryProposal) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["recoveryProposal"],
+      message: "An approval request must include an executable recovery proposal.",
+    });
+  }
+  if (result.status === "success" && !result.widget) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["widget"],
+      message: "A successful result must include a widget.",
+    });
+  }
 });
 
 export const intentResolutionSchema = z.object({
@@ -125,8 +151,9 @@ export const intentResolutionSchema = z.object({
 
 // Keep the model-facing schema within Structured Outputs' supported JSON Schema subset.
 export const modelWidgetResultSchema = z.object({
-  status: z.enum(["success", "needs_clarification", "cannot_answer"]),
+  status: z.enum(["success", "needs_clarification", "needs_approval", "cannot_answer"]),
   message: z.string(),
+  proposedQuery: z.string(),
   widget: z
     .object({
       title: z.string(),
@@ -151,3 +178,4 @@ export type GenerateWidgetResult = z.infer<typeof generateWidgetResultSchema>;
 export type ModelWidgetResult = z.infer<typeof modelWidgetResultSchema>;
 export type RequestUsage = NonNullable<GenerateWidgetResult["usage"]>;
 export type AgentTrace = z.infer<typeof agentTraceSchema>;
+export type RecoveryProposal = z.infer<typeof recoveryProposalSchema>;

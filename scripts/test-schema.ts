@@ -28,6 +28,7 @@ import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-sche
 import { applyRequestedHypotheses } from "../lib/hypothesis-data";
 import { resolveOfficialConnector } from "../lib/data-connectors";
 import { migrateWorkspace, normalizeDashboardName } from "../lib/storage";
+import { buildRecoveryExecutionTrace, createRecoveryProposal, isRecoveryApproval, isRecoveryDismissal } from "../lib/recovery-proposal";
 import { strToU8, zipSync } from "fflate";
 
 const valid = {
@@ -59,6 +60,36 @@ const valid = {
 
 assert.equal(widgetSpecSchema.safeParse(valid).success, true, "valid widget should pass");
 const parsedValidWidget = widgetSpecSchema.parse(valid);
+const recoveryProposal = createRecoveryProposal(
+  parsedValidWidget,
+  "Monthly data are not comparable; use an annual chart from the verified rows already collected.",
+  "Compare annual net migration in Canada and the United States over the last 10 years",
+);
+assert.equal(isRecoveryApproval("你觉得怎么好画就怎么画"), true, "natural-language approval should execute a pending proposal");
+assert.equal(isRecoveryApproval("你觉得怎么好画 怎么方便就怎么画"), true, "the observed recovery phrasing should reuse the cached proposal");
+assert.equal(isRecoveryApproval("Use the recommended chart"), true, "English approval should execute a pending proposal");
+assert.equal(isRecoveryApproval("换成季度数据看看"), false, "a material revision must not be mistaken for approval");
+assert.equal(isRecoveryDismissal("算了"), true, "dismissal should clear a pending proposal");
+assert.equal(buildRecoveryExecutionTrace(recoveryProposal).events.length, 3, "cached execution should expose a concise operational trace");
+assert.equal(
+  generateWidgetResultSchema.safeParse({
+    status: "needs_approval",
+    message: recoveryProposal.description,
+    widget: null,
+    recoveryProposal,
+  }).success,
+  true,
+  "approval state should carry a complete validated cached widget",
+);
+assert.equal(
+  generateWidgetResultSchema.safeParse({
+    status: "needs_approval",
+    message: "Approve this alternative?",
+    widget: null,
+  }).success,
+  false,
+  "approval state without an executable proposal must fail",
+);
 
 const compactDashboard = buildDashboardContext([
   parsedValidWidget,
@@ -84,7 +115,7 @@ const migratedWorkspace = migrateWorkspace({
   version: 2,
   activeDashboardId: "stocks",
   dashboards: [
-    { id: "economy", name: "Economy", widgets: [parsedValidWidget], layouts: {}, messages: [], conversationContext: "macro context" },
+    { id: "economy", name: "Economy", widgets: [parsedValidWidget], layouts: {}, messages: [], conversationContext: "macro context", pendingRecovery: recoveryProposal },
     { id: "stocks", name: "Stocks", widgets: [], layouts: {}, messages: [{ id: "m1", role: "user", content: "MSFT" }], conversationContext: "equity context" },
   ],
 });
@@ -92,6 +123,8 @@ assert.equal(migratedWorkspace?.dashboards.length, 2, "multi-dashboard storage s
 assert.equal(migratedWorkspace?.activeDashboardId, "stocks", "multi-dashboard storage should preserve the active workspace");
 assert.equal(migratedWorkspace?.dashboards[0].conversationContext, "macro context", "dashboard conversation memory should remain isolated");
 assert.equal(migratedWorkspace?.dashboards[1].conversationContext, "equity context", "a second dashboard should retain its own memory");
+assert.equal(migratedWorkspace?.dashboards[0].pendingRecovery?.id, recoveryProposal.id, "a recovery proposal should persist only in its dashboard workspace");
+assert.equal(migratedWorkspace?.dashboards[1].pendingRecovery, null, "dashboards without proposals should remain isolated");
 assert.equal(normalizeDashboardName("  Market   Research  "), "Market Research", "dashboard names should be compact and safe");
 
 const refreshContextFixture = buildRefreshContext(parsedValidWidget);

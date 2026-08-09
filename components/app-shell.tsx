@@ -18,10 +18,12 @@ import {
 } from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
 import { buildRefreshContext, validateRefreshCandidate, type RefreshContext } from "@/lib/widget-refresh";
+import { buildRecoveryExecutionTrace, isRecoveryApproval, isRecoveryDismissal } from "@/lib/recovery-proposal";
 import type { AgentTrace, GenerateWidgetResult } from "@/lib/widget-schema";
-import type { ApiHealth, ChatMessage, DashboardWidget } from "@/types";
+import type { ApiHealth, ChatMessage, DashboardWidget, RecoveryProposal } from "@/types";
 
 const BREAKPOINT_COLS = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 } as const;
+const ZERO_USAGE = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, webSearchCalls: 0, modelCalls: 0 };
 
 function widgetSize(widget: DashboardWidget, columns: number) {
   if (widget.visualization === "metric") {
@@ -177,6 +179,7 @@ export function AppShell() {
   const layouts = activeDashboard.layouts;
   const messages = activeDashboard.messages;
   const conversationContext = activeDashboard.conversationContext;
+  const pendingRecovery = activeDashboard.pendingRecovery;
 
   const updateActiveDashboard = useCallback((updater: (dashboard: StoredDashboard) => StoredDashboard) => {
     setWorkspace((current) => ({
@@ -198,6 +201,9 @@ export function AppShell() {
   }, [updateActiveDashboard]);
   const setConversationContext = useCallback((value: SetStateAction<string>) => {
     updateActiveDashboard((dashboard) => ({ ...dashboard, conversationContext: resolveState(value, dashboard.conversationContext) }));
+  }, [updateActiveDashboard]);
+  const setPendingRecovery = useCallback((value: SetStateAction<RecoveryProposal | null>) => {
+    updateActiveDashboard((dashboard) => ({ ...dashboard, pendingRecovery: resolveState(value, dashboard.pendingRecovery) }));
   }, [updateActiveDashboard]);
 
   useEffect(() => {
@@ -229,8 +235,52 @@ export function AppShell() {
     }, 150);
   }, []);
 
+  const approveRecovery = useCallback((approvalText = "Use recommended chart") => {
+    if (!pendingRecovery || loadingStage) return;
+    const widget = pendingRecovery.widget;
+    setWidgets((current) => [...current, widget]);
+    setLayouts((current) => addWidgetToLayouts(current, widget));
+    setConversationContext(pendingRecovery.proposedQuery);
+    setPendingRecovery(null);
+    setMessages((current) => [
+      ...current,
+      { id: crypto.randomUUID(), role: "user" as const, content: approvalText },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant" as const,
+        content: `Created “${widget.title}” from the verified data collected in the previous run. No new search or model call was made.`,
+        widgetId: widget.id,
+        usage: ZERO_USAGE,
+        trace: buildRecoveryExecutionTrace(pendingRecovery),
+      },
+    ].slice(-20));
+    setQuery("");
+    setLastFailedRequest(null);
+  }, [loadingStage, pendingRecovery, setConversationContext, setLayouts, setMessages, setPendingRecovery, setWidgets]);
+
+  const dismissRecovery = useCallback((withMessage = false, userText = "Dismiss") => {
+    if (!pendingRecovery || loadingStage) return;
+    setPendingRecovery(null);
+    if (withMessage) {
+      setMessages((current) => [
+        ...current,
+        { id: crypto.randomUUID(), role: "user" as const, content: userText },
+        { id: crypto.randomUUID(), role: "assistant" as const, content: "The suggested alternative was dismissed. Ask for a different metric, frequency, or scope whenever you are ready." },
+      ].slice(-20));
+    }
+    setQuery("");
+  }, [loadingStage, pendingRecovery, setMessages, setPendingRecovery]);
+
   const submit = useCallback(async () => {
     const typedQuery = query.trim();
+    if (pendingRecovery && isRecoveryApproval(typedQuery) && !loadingStage) {
+      approveRecovery(typedQuery);
+      return;
+    }
+    if (pendingRecovery && isRecoveryDismissal(typedQuery) && !loadingStage) {
+      dismissRecovery(true, typedQuery);
+      return;
+    }
     if (EXPLAIN_FAILURE_PATTERN.test(typedQuery) && lastFailedRequest && !loadingStage) {
       const explanationMessages: ChatMessage[] = [
         { id: crypto.randomUUID(), role: "user", content: typedQuery },
@@ -252,6 +302,7 @@ export function AppShell() {
       ? lastFailedRequest!.query
       : typedQuery || (userDataset ? "Analyze this dataset and create the most useful visualization." : "");
     if (!cleanQuery || loadingStage) return;
+    if (pendingRecovery) setPendingRecovery(null);
 
     const contextualDataset = !retrying && !userDataset
       ? buildReferencedWidgetDataset(widgets, cleanQuery)
@@ -301,6 +352,9 @@ export function AppShell() {
           ...current,
           assistantMessage,
         ].slice(-20));
+        if (result.status === "needs_approval" && result.recoveryProposal) {
+          setPendingRecovery(result.recoveryProposal);
+        }
         if (result.status === "cannot_answer") {
           setLastFailedRequest({
             query: cleanQuery,
@@ -323,6 +377,7 @@ export function AppShell() {
       }
 
       const widget: DashboardWidget = result.widget;
+      setPendingRecovery(null);
       setWidgets((current) => [...current, widget]);
       setLayouts((current) => addWidgetToLayouts(current, widget));
       const assistantMessage: ChatMessage = {
@@ -369,7 +424,7 @@ export function AppShell() {
     } finally {
       setLoadingStage(null);
     }
-  }, [activeDashboard.name, conversationContext, lastFailedRequest, loadingStage, messages, query, setConversationContext, setLayouts, setMessages, setWidgets, userDataset, widgets]);
+  }, [activeDashboard.name, approveRecovery, conversationContext, dismissRecovery, lastFailedRequest, loadingStage, messages, pendingRecovery, query, setConversationContext, setLayouts, setMessages, setPendingRecovery, setWidgets, userDataset, widgets]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
@@ -481,6 +536,7 @@ export function AppShell() {
       layouts: {},
       messages: [],
       conversationContext: "",
+      pendingRecovery: null,
     }));
     setRefreshNotices({});
     setLastFailedRequest(null);
@@ -490,8 +546,9 @@ export function AppShell() {
   const clearConversation = useCallback(() => {
     setMessages([]);
     setConversationContext("");
+    setPendingRecovery(null);
     setLastFailedRequest(null);
-  }, [setConversationContext, setMessages]);
+  }, [setConversationContext, setMessages, setPendingRecovery]);
 
   const selectDashboard = useCallback((id: string) => {
     if (id === workspace.activeDashboardId || loadingStage || refreshingIds.size) return;
@@ -600,11 +657,14 @@ export function AppShell() {
         userDataset={userDataset}
         dashboardWidgetCount={widgets.length}
         dashboardName={activeDashboard.name}
+        recoveryProposal={pendingRecovery}
         onToggle={() => setChatCollapsed((value) => !value)}
         onClear={clearConversation}
         onQueryChange={setQuery}
         onDatasetChange={setUserDataset}
         onSubmit={submit}
+        onApproveRecovery={() => approveRecovery()}
+        onDismissRecovery={() => dismissRecovery()}
         onFocusWidget={focusWidget}
       />
     </main>
