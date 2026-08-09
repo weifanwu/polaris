@@ -1,4 +1,5 @@
 import type { DataConnector } from "./types";
+import { strFromU8, unzipSync } from "fflate";
 import { hasSubnationalGeography } from "./query-capabilities";
 import { fetchWithTransientRetry } from "./http";
 import {
@@ -26,6 +27,7 @@ const INDICATORS: Indicator[] = [
   { id: "NY.GDP.MKTP.CD", label: "GDP", zh: "GDP", unit: "current USD", decimals: 0, aliases: [/gross domestic product/i, /\bgdp\b/i, /国内生产总值/] },
   { id: "FP.CPI.TOTL.ZG", label: "Consumer-price inflation", zh: "消费者价格通胀率", unit: "%", decimals: 2, aliases: [/consumer price inflation/i, /inflation rate/i, /\binflation\b/i, /通胀率|通货膨胀/], forceLevel: true },
   { id: "SL.UEM.TOTL.ZS", label: "Unemployment rate", zh: "失业率", unit: "% of labour force", decimals: 2, aliases: [/unemployment rate/i, /失业率/], forceLevel: true },
+  { id: "SM.POP.NETM", label: "Net migration", zh: "净移民", unit: "persons", decimals: 0, aliases: [/net (?:international )?migration/i, /净(?:国际)?移民/], forceLevel: true },
   { id: "SP.POP.TOTL", label: "Population", zh: "人口", unit: "persons", decimals: 0, aliases: [/\bpopulation\b/i, /人口/] },
   { id: "SP.DYN.LE00.IN", label: "Life expectancy at birth", zh: "出生时预期寿命", unit: "years", decimals: 1, aliases: [/life expectancy/i, /预期寿命|平均寿命/] },
   { id: "EN.ATM.CO2E.PC", label: "CO₂ emissions per capita", zh: "人均二氧化碳排放", unit: "t/person", decimals: 2, aliases: [/co2 emissions? per capita/i, /carbon emissions? per capita/i, /人均.*(?:碳|二氧化碳).*排放/] },
@@ -54,7 +56,7 @@ const COUNTRIES: Country[] = [
   { code: "CHE", label: "Switzerland", zh: "瑞士", aliases: [/\bswitzerland\b/i, /瑞士/] },
   { code: "NOR", label: "Norway", zh: "挪威", aliases: [/\bnorway\b/i, /挪威/] },
   { code: "SWE", label: "Sweden", zh: "瑞典", aliases: [/\bsweden\b/i, /瑞典/] },
-  { code: "WLD", label: "World", zh: "全球", aliases: [/\bworld\b/i, /\bglobal\b/i, /全球|世界/] },
+  { code: "WLD", label: "World", zh: "全球", aliases: [/\bworld\b(?!\s+bank)/i, /\bglobal\b/i, /全球|世界/] },
   { code: "EUU", label: "European Union", zh: "欧盟", aliases: [/european union/i, /\beu\b/i, /欧盟/] },
 ];
 
@@ -65,6 +67,84 @@ type ApiPoint = {
 };
 
 type ApiMetadata = { lastupdated?: string };
+
+type IndicatorPayload = { metadata: ApiMetadata; points: ApiPoint[]; retrievalUrl: string };
+
+const downloadCache = new Map<string, { expiresAt: number; promise: Promise<IndicatorPayload> }>();
+
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        value += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(value);
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+  cells.push(value);
+  return cells;
+}
+
+async function downloadIndicatorCsv(indicatorId: string, countryCodes: Set<string>): Promise<IndicatorPayload> {
+  const dataUrl = `https://api.worldbank.org/v2/en/indicator/${indicatorId}?downloadformat=csv`;
+  const cached = downloadCache.get(indicatorId);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  const promise = (async () => {
+    const response = await fetchWithTransientRetry(dataUrl, {}, { timeoutMs: 25_000 });
+    if (!response.ok) throw new Error(`World Bank indicator download returned ${response.status}`);
+    const archive = await response.arrayBuffer();
+    if (archive.byteLength > 5_000_000) throw new Error("World Bank indicator download exceeded the safety limit");
+    const files = unzipSync(new Uint8Array(archive));
+    const dataEntry = Object.entries(files).find(([name]) =>
+      name.startsWith(`API_${indicatorId}_`) && name.toLowerCase().endsWith(".csv") && !name.startsWith("Metadata_"),
+    );
+    if (!dataEntry) throw new Error("World Bank indicator CSV was not found in the download");
+    const lines = strFromU8(dataEntry[1]).replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+    const updated = lines.find((line) => line.startsWith('"Last Updated Date"'));
+    const headerIndex = lines.findIndex((line) => line.startsWith('"Country Name","Country Code"'));
+    if (headerIndex < 0) throw new Error("World Bank indicator CSV headers were not found");
+    const headers = parseCsvLine(lines[headerIndex]);
+    const points: ApiPoint[] = [];
+    for (const line of lines.slice(headerIndex + 1)) {
+      const cells = parseCsvLine(line);
+      const countryCode = cells[1];
+      if (!countryCodes.has(countryCode)) continue;
+      headers.slice(4).forEach((year, offset) => {
+        const raw = cells[offset + 4]?.trim() ?? "";
+        const value = raw === "" ? null : Number(raw);
+        points.push({
+          countryiso3code: countryCode,
+          date: year,
+          value: value !== null && Number.isFinite(value) ? value : null,
+        });
+      });
+    }
+    return {
+      metadata: { lastupdated: updated ? parseCsvLine(updated)[1] : undefined },
+      points,
+      retrievalUrl: dataUrl,
+    };
+  })();
+  downloadCache.set(indicatorId, { expiresAt: Date.now() + 6 * 60 * 60 * 1_000, promise });
+  try {
+    return await promise;
+  } catch (error) {
+    downloadCache.delete(indicatorId);
+    throw error;
+  }
+}
 
 function selectCountries(query: string) {
   const selected = COUNTRIES.filter((country) => country.aliases.some((alias) => alias.test(query)));
@@ -108,12 +188,22 @@ export const worldBankIndicatorsConnector: DataConnector = {
     url.searchParams.set("date", `${startYear}:${currentYear}`);
     url.searchParams.set("per_page", String(Math.max(100, periods * countries.length + 20)));
 
-    const response = await fetchWithTransientRetry(url, {}, { timeoutMs: 15_000 });
-    if (!response.ok) throw new Error(`World Bank Indicators API returned ${response.status}`);
-    const payload = await response.json() as [ApiMetadata, ApiPoint[]] | { message?: unknown };
-    if (!Array.isArray(payload) || !Array.isArray(payload[1])) throw new Error("World Bank Indicators API returned an invalid payload");
-    const metadata = payload[0];
-    const points = payload[1];
+    let metadata: ApiMetadata;
+    let points: ApiPoint[];
+    let retrievalUrl = url.toString();
+    if (indicator.id === "SM.POP.NETM") {
+      const downloaded = await downloadIndicatorCsv(indicator.id, new Set(countries.map((country) => country.code)));
+      metadata = downloaded.metadata;
+      points = downloaded.points;
+      retrievalUrl = downloaded.retrievalUrl;
+    } else {
+      const response = await fetchWithTransientRetry(url, {}, { timeoutMs: 15_000 });
+      if (!response.ok) throw new Error(`World Bank Indicators API returned ${response.status}`);
+      const payload = await response.json() as [ApiMetadata, ApiPoint[]] | { message?: unknown };
+      if (!Array.isArray(payload) || !Array.isArray(payload[1])) throw new Error("World Bank Indicators API returned an invalid payload");
+      metadata = payload[0];
+      points = payload[1];
+    }
 
     const rawByCountry = new Map<string, Map<string, number | null>>();
     for (const country of countries) rawByCountry.set(country.code, new Map());
@@ -145,11 +235,14 @@ export const worldBankIndicatorsConnector: DataConnector = {
     const availablePoints = numericCells.filter((value) => value !== null).length;
     const missingPoints = numericCells.length - availablePoints;
     const calculationLabel = calculation === "level" ? "" : (chinese ? " · 年度变化" : " · annual change");
+    const sourceName = indicator.id === "SM.POP.NETM"
+      ? "World Bank Indicators downloadable CSV"
+      : "World Bank Indicators API";
 
     return {
       message: chinese
-        ? `已通过世界银行 Indicators API 校验 ${availablePoints}/${numericCells.length} 个年度数据点；本次不使用模型或网页搜索。`
-        : `Validated ${availablePoints}/${numericCells.length} annual observations through the World Bank Indicators API with no model or Web Search call.`,
+        ? `已通过${sourceName}校验 ${availablePoints}/${numericCells.length} 个年度数据点；本次不使用模型或网页搜索。`
+        : `Validated ${availablePoints}/${numericCells.length} annual observations through the ${sourceName} with no model or Web Search call.`,
       widget: {
         title: `${chinese ? indicator.zh : indicator.label}${calculationLabel}`,
         subtitle: `${rows[0].year} – ${rows.at(-1)!.year} · ${indicator.id}${metadata.lastupdated ? ` · updated ${metadata.lastupdated}` : ""}`,
@@ -162,11 +255,11 @@ export const worldBankIndicatorsConnector: DataConnector = {
         summary: buildSummary(labels, rows, chinese),
         sources: [
           { title: `World Bank indicator ${indicator.id}`, url: `https://data.worldbank.org/indicator/${indicator.id}` },
-          { title: "World Bank Indicators API", url: url.toString() },
+          { title: indicator.id === "SM.POP.NETM" ? "World Bank downloadable indicator CSV" : "World Bank Indicators API", url: retrievalUrl },
         ],
         dataQuality: {
           method: "official_connector",
-          sourceName: "World Bank Indicators API",
+          sourceName,
           requestedPoints: numericCells.length,
           availablePoints,
           missingPoints,

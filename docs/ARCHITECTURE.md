@@ -95,7 +95,7 @@ Statistics Canada does not publish a standalone monthly unemployment rate for th
 
 ### World Bank Indicators
 
-The connector uses the official Indicators API for comparable annual country data. It supports up to five countries or aggregates in one request and covers GDP, GDP growth, population, inflation, unemployment, life expectancy, carbon emissions, trade openness, government debt, internet use, and fertility. Monthly and quarterly requests are deliberately rejected because the source is annual.
+The connector uses the official Indicators API for comparable annual country data. It supports up to five countries or aggregates in one request and covers GDP, GDP growth, population, net migration, inflation, unemployment, life expectancy, carbon emissions, trade openness, government debt, internet use, and fertility. Monthly and quarterly requests are deliberately rejected because the source is annual. Net migration uses the publisher's compact downloadable CSV ZIP, validates its headers and size, and caches it for six hours so a slow JSON endpoint cannot force broad research. A cross-country monthly or quarterly net-migration request is routed to an explicit approval proposal backed by the standardized annual `SM.POP.NETM` series; it never reaches Web Search or receives synthetic subannual rows.
 
 ### World Bank Pink Sheet
 

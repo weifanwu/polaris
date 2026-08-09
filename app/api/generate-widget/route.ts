@@ -20,7 +20,9 @@ import {
   getOpenAIModel,
 } from "@/lib/openai";
 import {
+  buildOfficialRecoveryQuery,
   resolveOfficialConnector,
+  resolveWithOfficialRecoveryAlternative,
   resolveWithOfficialProxy,
 } from "@/lib/data-connectors";
 import type { DataConnectorResolution, DataConnectorResult } from "@/lib/data-connectors/types";
@@ -583,6 +585,48 @@ async function connectorResolutionResponse(
   if (resolution.status === "success") return connectorResponse(resolution.result, query, usage, trace, analysisContext);
   if (resolution.status === "unavailable") return connectorUnavailableResponse(resolution, query);
   return null;
+}
+
+async function officialRecoveryAlternativeResponse(
+  alternative: NonNullable<Awaited<ReturnType<typeof resolveWithOfficialRecoveryAlternative>>>,
+  originalQuery: string,
+  usage: RequestUsage,
+  analysisContext: Omit<ProfessionalAnalysisContext, "query"> = {},
+) {
+  const parsedWidget = widgetSpecSchema.parse({
+    ...alternative.result.widget,
+    id: crypto.randomUUID(),
+    originalQuery: alternative.proposedQuery,
+    generatedAt: new Date().toISOString(),
+  });
+  const insightResult = await applyProfessionalInsights(parsedWidget, {
+    query: alternative.proposedQuery,
+    ...analysisContext,
+  });
+  const proposal = createRecoveryProposal(
+    insightResult.widget,
+    alternative.message,
+    alternative.proposedQuery,
+  );
+  return Response.json(generateWidgetResultSchema.parse({
+    status: "needs_approval",
+    message: proposal.description,
+    widget: null,
+    recoveryProposal: proposal,
+    conversationContext: originalQuery,
+    usage: addUsage(usage, insightResult.usage),
+    trace: {
+      mode: "connector",
+      summary: "An incompatible-frequency request was converted into a cached, standardized annual alternative from an official structured API.",
+      events: [
+        traceEvent("route", "Official recovery route selected", "The requested cross-country net-migration metric exists, but not at a comparable monthly frequency."),
+        traceEvent("plan", "Comparable annual alternative prepared", alternative.proposedQuery, "warning"),
+        traceEvent("source", "Official observations loaded", `${proposal.widget.rows.length} annual rows were loaded from ${proposal.widget.dataQuality?.sourceName || "the World Bank Indicators API"}; no Web Search was used.`),
+        traceEvent("validation", "Waiting for approval", "The cited widget is cached in this dashboard. Approval will render it with zero additional searches and zero model calls.", "warning"),
+        insightResult.event,
+      ],
+    },
+  }));
 }
 
 function friendlyError(error: unknown) {
@@ -1326,8 +1370,9 @@ export async function POST(request: Request) {
       ? resolveDeterministicFollowUp(query, conversationContext)
       : null;
     const completeQualifiedRequest = isCompleteQualifiedDataRequest(query);
+    const hasOfficialRecoveryAlternative = Boolean(buildOfficialRecoveryQuery(query));
 
-    if (!process.env.OPENAI_API_KEY && !deterministicFollowUp && !completeQualifiedRequest) {
+    if (!process.env.OPENAI_API_KEY && !deterministicFollowUp && !completeQualifiedRequest && !hasOfficialRecoveryAlternative) {
       return Response.json(
         { error: "缺少 OPENAI_API_KEY。官方数据连接器仍可直接回答支持的数据集。", code: "configuration_error", detail: "No exact connector matched, so model-assisted intent resolution was required.", requestId, retryable: false },
         { status: 503 },
@@ -1341,7 +1386,7 @@ export async function POST(request: Request) {
     let intentUsage: RequestUsage | null = null;
 
     if (!skipClarification) {
-      if (deterministicFollowUp || completeQualifiedRequest) {
+      if (deterministicFollowUp || completeQualifiedRequest || hasOfficialRecoveryAlternative) {
         resolvedQuery = deterministicFollowUp ?? query;
         researchMode = inferResearchMode(resolvedQuery);
         allowPartialData = inferPartialDataPolicy(resolvedQuery);
@@ -1400,6 +1445,18 @@ export async function POST(request: Request) {
       { conversationContext, history, dashboardContext },
     );
     if (resolvedConnectorResponse) return resolvedConnectorResponse;
+
+    if (!refreshContext) {
+      const officialAlternative = await resolveWithOfficialRecoveryAlternative(resolvedQuery);
+      if (officialAlternative) {
+        return officialRecoveryAlternativeResponse(
+          officialAlternative,
+          resolvedQuery,
+          intentUsage ?? ZERO_USAGE,
+          { conversationContext, history, dashboardContext },
+        );
+      }
+    }
 
     if (!client) {
       return Response.json(

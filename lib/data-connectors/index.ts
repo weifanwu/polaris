@@ -11,6 +11,13 @@ import { usBureauLaborStatisticsConnector } from "./us-bureau-labor-statistics";
 import { worldBankCommodityConnector } from "./world-bank-commodities";
 import { worldBankIndicatorsConnector } from "./world-bank-indicators";
 
+export type OfficialRecoveryAlternative = {
+  connectorId: string;
+  result: DataConnectorResult;
+  proposedQuery: string;
+  message: string;
+};
+
 const CONNECTORS = [
   irccPermanentResidentsConnector,
   worldBankCommodityConnector,
@@ -65,4 +72,33 @@ export async function resolveWithOfficialProxy(query: string): Promise<DataConne
     }
   }
   return null;
+}
+
+export function buildOfficialRecoveryQuery(query: string) {
+  const netMigration = /(?:net (?:international )?migration|净(?:国际)?移民)/i.test(query);
+  const incompatibleFrequency = /(?:每月|逐月|月度|环比|每季|季度|monthly|months?|month.?over.?month|quarterly|quarters?|quarter.?over.?quarter|\bmom\b|\bqoq\b)/i.test(query);
+  if (!netMigration || !incompatibleFrequency) return null;
+
+  const annual = query
+    .replace(/(?:每月|逐月|月度|环比|每季|季度)/gi, "年度")
+    .replace(/(?:monthly|months?|month.?over.?month|quarterly|quarters?|quarter.?over.?quarter|\bmom\b|\bqoq\b)/gi, "annual")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return `${annual}；使用 World Bank SM.POP.NETM 的同口径年度净移民人数，不插值、不进行频率拆分`.slice(0, 500);
+}
+
+export async function resolveWithOfficialRecoveryAlternative(query: string): Promise<OfficialRecoveryAlternative | null> {
+  const proposedQuery = buildOfficialRecoveryQuery(query);
+  if (!proposedQuery) return null;
+  const result = await worldBankIndicatorsConnector.tryResolve(proposedQuery);
+  if (!result) return null;
+  const chinese = /[\u3400-\u9fff]/.test(query);
+  return {
+    connectorId: worldBankIndicatorsConnector.id,
+    result,
+    proposedQuery,
+    message: chinese
+      ? "加拿大官方净移民主要按季度发布，美国可比序列主要按年度发布，因此不能诚实拆成月度值。建议改用 World Bank/UN 的 SM.POP.NETM 同口径年度净移民序列，对比过去10年；数据已经加载并验证，批准后会直接画图，不再搜索或调用模型。"
+      : "Comparable monthly net-migration series are not published for both countries. Use the standardized annual World Bank/UN SM.POP.NETM series for the last 10 years instead; the data are already loaded and validated, so approval will render it without another search or model call.",
+  };
 }

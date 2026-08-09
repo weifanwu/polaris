@@ -26,7 +26,7 @@ import { buildDashboardContext, buildReferencedWidgetDataset, MAX_DASHBOARD_CONT
 import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { applyRequestedHypotheses } from "../lib/hypothesis-data";
-import { resolveOfficialConnector } from "../lib/data-connectors";
+import { buildOfficialRecoveryQuery, resolveOfficialConnector } from "../lib/data-connectors";
 import { migrateWorkspace, normalizeDashboardName } from "../lib/storage";
 import { buildRecoveryExecutionTrace, createRecoveryProposal, isRecoveryApproval, isRecoveryDismissal } from "../lib/recovery-proposal";
 import { strToU8, zipSync } from "fflate";
@@ -71,6 +71,11 @@ assert.equal(isRecoveryApproval("Use the recommended chart"), true, "English app
 assert.equal(isRecoveryApproval("换成季度数据看看"), false, "a material revision must not be mistaken for approval");
 assert.equal(isRecoveryDismissal("算了"), true, "dismissal should clear a pending proposal");
 assert.equal(buildRecoveryExecutionTrace(recoveryProposal).events.length, 3, "cached execution should expose a concise operational trace");
+const migrationRecoveryQuery = buildOfficialRecoveryQuery("加拿大和美国过去10年月度净移民数量对比 line chart");
+assert.match(migrationRecoveryQuery ?? "", /SM\.POP\.NETM/, "incompatible net-migration frequencies should route to the standardized annual indicator");
+assert.match(migrationRecoveryQuery ?? "", /过去10年/, "recovery should preserve the requested window");
+assert.doesNotMatch(migrationRecoveryQuery ?? "", /月度|monthly/i, "recovery must remove the invalid monthly frequency");
+assert.equal(buildOfficialRecoveryQuery("加拿大和美国过去10年年度净移民数量对比"), null, "an already annual request should not require recovery");
 assert.equal(
   generateWidgetResultSchema.safeParse({
     status: "needs_approval",

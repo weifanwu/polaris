@@ -146,7 +146,7 @@ The proposal is persisted inside the active dashboard, so switching dashboards o
 | Statistics Canada | CPI, employment, overall and broad-industry unemployment, labour-force participation, wages, monthly real GDP, quarterly population, new-housing prices, retail trade, merchandise trade | Web Data Service JSON vectors |
 | Immigration, Refugees and Citizenship Canada | National monthly permanent-resident admissions from the published workbook Total series | Official XLSX |
 | Bank of Canada | Policy and Bank rates, CORRA, prime and mortgage rates, government bond yields, major CAD exchange rates | Valet JSON API |
-| World Bank Indicators | GDP, population, inflation, unemployment, emissions, trade, debt, life expectancy, internet use, fertility | Official JSON API |
+| World Bank Indicators | GDP, population, net migration, inflation, unemployment, emissions, trade, debt, life expectancy, internet use, fertility | Official JSON API + CSV download |
 | World Bank Pink Sheet | Gold, silver, energy, metals, and agricultural commodities | Official monthly XLSX |
 | U.S. Bureau of Labor Statistics | CPI, unemployment, participation, payrolls, employment, average hourly earnings | Public Data API with a structured FRED fallback and versioned emergency snapshot |
 

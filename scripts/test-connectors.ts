@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   resolveOfficialConnector,
   resolveWithOfficialConnector,
+  resolveWithOfficialRecoveryAlternative,
   resolveWithOfficialProxy,
 } from "../lib/data-connectors/index";
 
@@ -66,6 +67,13 @@ const globalGdp = await resolveWithOfficialConnector("比较过去10年加拿大
 assert.ok(globalGdp, "World Bank Indicators connector should answer cross-country GDP queries");
 assert.equal(globalGdp.widget.dataQuality?.sourceName, "World Bank Indicators API");
 assert.equal(globalGdp.widget.columns.length, 4, "GDP query should contain three country series");
+
+const migrationRecovery = await resolveWithOfficialRecoveryAlternative("加拿大和美国过去10年月度净移民数量对比 line chart");
+assert.ok(migrationRecovery, "incompatible monthly net migration should prepare a standardized annual alternative");
+assert.equal(migrationRecovery.result.widget.dataQuality?.frequency, "annual");
+assert.equal(migrationRecovery.result.widget.dataQuality?.sourceName, "World Bank Indicators downloadable CSV");
+assert.equal(migrationRecovery.result.widget.columns.length, 3, "migration recovery should compare Canada and the United States");
+assert.ok(migrationRecovery.result.widget.rows.length >= 10, "migration recovery should retain a useful 10-year annual window");
 
 const population = await resolveWithOfficialConnector("过去五年加拿大和阿尔伯塔省每季度人口变化");
 assert.ok(population, "Statistics Canada connector should answer population queries");
