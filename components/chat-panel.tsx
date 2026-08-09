@@ -18,6 +18,7 @@ type Props = {
   messages: ChatMessage[];
   loadingStage: "working" | "analyzing" | null;
   userDataset: UserDataset | null;
+  dashboardWidgetCount: number;
   onToggle: () => void;
   onClear: () => void;
   onQueryChange: (query: string) => void;
@@ -32,6 +33,7 @@ export function ChatPanel({
   messages,
   loadingStage,
   userDataset,
+  dashboardWidgetCount,
   onToggle,
   onClear,
   onQueryChange,
@@ -246,7 +248,13 @@ export function ChatPanel({
             </div>
           </div>
         </div>
-        <p>{userDataset ? "Your attached data is used for this analysis only." : "Polaris can make mistakes. Verify important data at the source."}</p>
+        <p>
+          {userDataset
+            ? "Your attached data is used for this analysis only."
+            : dashboardWidgetCount > 0
+              ? `${dashboardWidgetCount} dashboard widget${dashboardWidgetCount === 1 ? "" : "s"} included as compact metadata context · no full tables sent`
+              : "Polaris can make mistakes. Verify important data at the source."}
+        </p>
       </div>
     </aside>
   );

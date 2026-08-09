@@ -21,6 +21,8 @@ import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { listWorksheetNames } from "../lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, parseUserDataset } from "../lib/user-dataset";
 import { fetchWithTransientRetry } from "../lib/data-connectors/http";
+import { buildDashboardContext, MAX_DASHBOARD_CONTEXT_CHARS, parseDashboardContext, queryReferencesDashboard } from "../lib/dashboard-context";
+import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { strToU8, zipSync } from "fflate";
 
@@ -52,6 +54,63 @@ const valid = {
 } as const;
 
 assert.equal(widgetSpecSchema.safeParse(valid).success, true, "valid widget should pass");
+const parsedValidWidget = widgetSpecSchema.parse(valid);
+
+const compactDashboard = buildDashboardContext([
+  parsedValidWidget,
+  { ...parsedValidWidget, id: "second-widget", title: "Second dashboard series", originalQuery: "second question" },
+], "What is the latest inflation rate?");
+assert.match(compactDashboard, /2 widgets/, "dashboard context should report the widget count");
+assert.match(compactDashboard, /Test series/, "dashboard context should include every widget title");
+assert.match(compactDashboard, /Second dashboard series/, "dashboard context should include later widget metadata");
+assert.doesNotMatch(compactDashboard, /first:/, "unrelated questions should receive metadata only");
+
+const expandedDashboard = buildDashboardContext([parsedValidWidget], "Compare the chart above with the current dashboard");
+assert.equal(queryReferencesDashboard("对比一下仪表板上面的图"), true, "dashboard references should trigger richer compact context");
+assert.match(expandedDashboard, /latest:/, "dashboard-referential questions should receive boundary observations");
+assert.ok(expandedDashboard.length <= MAX_DASHBOARD_CONTEXT_CHARS, "dashboard context must stay within the input budget");
+assert.equal(parseDashboardContext("x".repeat(MAX_DASHBOARD_CONTEXT_CHARS + 100)).length, MAX_DASHBOARD_CONTEXT_CHARS, "server dashboard context must be bounded independently");
+
+const refreshContextFixture = buildRefreshContext(parsedValidWidget);
+assert.deepEqual(parseRefreshContext(refreshContextFixture), refreshContextFixture, "refresh identity metadata should round-trip through the server parser");
+assert.deepEqual(
+  validateRefreshCandidate(parsedValidWidget, { ...parsedValidWidget, generatedAt: "2026-08-08T12:00:00.000Z" }),
+  { compatible: true, changed: false },
+  "generated timestamps alone must not update a widget",
+);
+assert.deepEqual(
+  validateRefreshCandidate(parsedValidWidget, { ...parsedValidWidget, rows: [...parsedValidWidget.rows, { cells: ["2026-08-07", "43"] }] }),
+  { compatible: true, changed: true },
+  "new observations should update a compatible widget",
+);
+assert.equal(
+  validateRefreshCandidate(parsedValidWidget, {
+    ...parsedValidWidget,
+    columns: [parsedValidWidget.columns[0], { ...parsedValidWidget.columns[1], label: "Different metric" }],
+  }).compatible,
+  false,
+  "refresh must reject a changed metric identity",
+);
+assert.equal(
+  validateRefreshCandidate(parsedValidWidget, {
+    ...parsedValidWidget,
+    dataQuality: { ...parsedValidWidget.dataQuality!, sourceName: "Different official source" },
+  }).compatible,
+  false,
+  "official refresh must remain locked to the original connector",
+);
+const searchedWidget = widgetSpecSchema.parse({
+  ...valid,
+  dataQuality: { ...valid.dataQuality, method: "web_search", sourceName: "Example research" },
+});
+assert.equal(
+  validateRefreshCandidate(searchedWidget, {
+    ...searchedWidget,
+    sources: [{ title: "Unrelated publisher", url: "https://unrelated.example/data" }],
+  }).compatible,
+  false,
+  "web refresh must retain at least one original publisher domain",
+);
 
 assert.equal(
   widgetSpecSchema.safeParse({
@@ -284,4 +343,4 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-console.log("Polaris schema, connector, user-data, and agent-policy tests passed (43 cases).");
+console.log("Polaris schema, connector, dashboard-context, refresh, and agent-policy tests passed (57 cases).");

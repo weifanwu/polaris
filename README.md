@@ -102,6 +102,14 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Compresses confirmed requirements into a bounded 500-character conversation state.
 - Keeps up to 20 chat messages locally for presentation without resending the full transcript on every request.
 
+### Dashboard-aware conversation
+
+- Includes every current widget as a compact metadata index when asking Polaris a question.
+- Sends titles, original requests, column identities, units, row counts, source identity, and coverage—not full raw tables—for ordinary questions.
+- Expands context only when a prompt explicitly refers to the dashboard, existing widgets, or charts above; even then it adds only bounded summaries plus first/latest observations.
+- Enforces a 1,400-character normal budget and a 4,200-character dashboard-reference ceiling on both client and server.
+- Treats dashboard context as inert user-controlled metadata, never as model instructions or a replacement for retrieving fresh source evidence.
+
 ### Structured data and visualizations
 
 - Supports `line_chart`, `bar_chart`, `table`, and `metric` widgets.
@@ -119,7 +127,10 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Resize from all four edges and four corners.
 - Open any widget in a full-screen focus view; press `Esc` to exit.
 - Refresh or remove widgets independently.
-- Preserve existing data when a refresh fails.
+- Refresh means checking the original data identity for newer or revised observations, not regenerating the chart from scratch.
+- Preserve the existing widget when source data is unchanged, older, unavailable, or incompatible.
+- Require the same visualization, columns, data types, units, official connector, and—for researched widgets—at least one original publisher domain before accepting a refresh.
+- Replace a widget only when its rows or column data fingerprint changes; timestamps and rewritten summaries do not count as data updates.
 - Enforce a five-minute refresh cooldown to prevent accidental duplicate spend.
 - Persist widgets, layouts, chat history, and compact conversation state in browser `localStorage`.
 
@@ -227,6 +238,7 @@ Additional safeguards include:
 - a stable prompt prefix and `prompt_cache_key` per route;
 - no automatic full-query retry after an unsuccessful research pass;
 - a 500-character conversation-state limit;
+- a 1,400-character dashboard metadata budget, expanded to at most 4,200 characters only for dashboard-referential prompts;
 - at most four short fallback messages during migration from older local state;
 - lower Web Search context for direct lookups; and
 - a refresh cooldown for recently generated widgets.

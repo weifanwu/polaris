@@ -11,7 +11,7 @@ type Props = {
   widgets: DashboardWidget[];
   layouts: ResponsiveLayouts;
   refreshingIds: Set<string>;
-  refreshErrors: Record<string, string>;
+  refreshNotices: Record<string, { tone: "success" | "neutral" | "error"; message: string }>;
   onLayoutsChange: (layouts: ResponsiveLayouts) => void;
   onDelete: (id: string) => void;
   onRefresh: (id: string) => void;
@@ -21,7 +21,7 @@ export function DashboardGrid({
   widgets,
   layouts,
   refreshingIds,
-  refreshErrors,
+  refreshNotices,
   onLayoutsChange,
   onDelete,
   onRefresh,
@@ -78,7 +78,7 @@ export function DashboardGrid({
               <WidgetCard
                 widget={widget}
                 refreshing={refreshingIds.has(widget.id)}
-                refreshError={refreshErrors[widget.id]}
+                refreshNotice={refreshNotices[widget.id]}
                 focused={false}
                 onDelete={() => onDelete(widget.id)}
                 onRefresh={() => onRefresh(widget.id)}
@@ -101,7 +101,7 @@ export function DashboardGrid({
                 <WidgetCard
                   widget={focusedWidget}
                   refreshing={refreshingIds.has(focusedWidget.id)}
-                  refreshError={refreshErrors[focusedWidget.id]}
+                  refreshNotice={refreshNotices[focusedWidget.id]}
                   focused
                   onDelete={() => {
                     onDelete(focusedWidget.id);

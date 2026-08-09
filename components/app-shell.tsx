@@ -7,8 +7,10 @@ import { ChatPanel } from "./chat-panel";
 import { DashboardGrid } from "./dashboard-grid";
 import { Sidebar } from "./sidebar";
 import { demoWidgets } from "@/lib/demo-data";
+import { buildDashboardContext } from "@/lib/dashboard-context";
 import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
+import { buildRefreshContext, validateRefreshCandidate, type RefreshContext } from "@/lib/widget-refresh";
 import type { AgentTrace, GenerateWidgetResult } from "@/lib/widget-schema";
 import type { ApiHealth, ChatMessage, DashboardWidget } from "@/types";
 
@@ -57,6 +59,8 @@ async function requestWidget(
   history: ChatMessage[] = [],
   skipClarification = false,
   userDataset: UserDataset | null = null,
+  dashboardContext = "",
+  refreshContext: RefreshContext | null = null,
 ) {
   const response = await fetch("/api/generate-widget", {
     method: "POST",
@@ -72,6 +76,8 @@ async function requestWidget(
           })),
       skipClarification,
       userData: userDataset,
+      dashboardContext,
+      refreshContext,
     }),
   });
   const payload = (await response.json()) as GenerateWidgetResult & {
@@ -100,7 +106,13 @@ type FailedRequest = {
   conversationContext: string;
   history: ChatMessage[];
   userDataset: UserDataset | null;
+  dashboardContext: string;
   error: PolarisRequestError;
+};
+
+type RefreshNotice = {
+  tone: "success" | "neutral" | "error";
+  message: string;
 };
 
 class PolarisRequestError extends Error {
@@ -153,7 +165,7 @@ export function AppShell() {
   const [loadingStage, setLoadingStage] = useState<"working" | "analyzing" | null>(null);
   const [lastFailedRequest, setLastFailedRequest] = useState<FailedRequest | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
-  const [refreshErrors, setRefreshErrors] = useState<Record<string, string>>({});
+  const [refreshNotices, setRefreshNotices] = useState<Record<string, RefreshNotice>>({});
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [health, setHealth] = useState<ApiHealth>({ status: "error", model: null });
@@ -218,6 +230,9 @@ export function AppShell() {
     const requestContext = retrying ? lastFailedRequest!.conversationContext : userDataset ? "" : conversationContext;
     const requestHistory = retrying ? lastFailedRequest!.history : messages;
     const requestDataset = retrying ? lastFailedRequest!.userDataset : userDataset;
+    const requestDashboardContext = retrying
+      ? lastFailedRequest!.dashboardContext
+      : buildDashboardContext(widgets, cleanQuery);
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
@@ -237,6 +252,7 @@ export function AppShell() {
         requestHistory,
         false,
         requestDataset,
+        requestDashboardContext,
       );
       if (typeof result.conversationContext === "string") {
         setConversationContext(result.conversationContext);
@@ -260,6 +276,7 @@ export function AppShell() {
             conversationContext: requestContext,
             history: requestHistory,
             userDataset: requestDataset,
+            dashboardContext: requestDashboardContext,
             error: new PolarisRequestError({
               message: result.message,
               code: "analysis_incomplete",
@@ -304,6 +321,7 @@ export function AppShell() {
         conversationContext: requestContext,
         history: requestHistory,
         userDataset: requestDataset,
+        dashboardContext: requestDashboardContext,
         error: failure,
       });
       const assistantMessage: ChatMessage = {
@@ -320,33 +338,86 @@ export function AppShell() {
     } finally {
       setLoadingStage(null);
     }
-  }, [conversationContext, lastFailedRequest, loadingStage, messages, query, userDataset]);
+  }, [conversationContext, lastFailedRequest, loadingStage, messages, query, userDataset, widgets]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
     if (!existing || refreshingIds.has(id)) return;
 
     setRefreshingIds((current) => new Set(current).add(id));
-    setRefreshErrors((current) => ({ ...current, [id]: "" }));
+    setRefreshNotices((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     try {
       const ageMs = Date.now() - new Date(existing.generatedAt).getTime();
       if (Number.isFinite(ageMs) && ageMs < 5 * 60 * 1_000) {
-        throw new Error("这个组件在 5 分钟内刚更新过。为避免重复费用，请稍后再刷新。");
+        setRefreshNotices((current) => ({
+          ...current,
+          [id]: { tone: "neutral", message: "Checked recently. Wait five minutes before checking the source again." },
+        }));
+        return;
       }
 
-      const result = await requestWidget(existing.originalQuery, "", [], true);
+      const result = await requestWidget(
+        existing.originalQuery,
+        "",
+        [],
+        true,
+        null,
+        "",
+        buildRefreshContext(existing),
+      );
       if (result.status !== "success" || !result.widget) {
-        throw new Error(result.message);
+        setRefreshNotices((current) => ({
+          ...current,
+          [id]: { tone: "neutral", message: result.message || "No newer verified data was found. The existing widget was kept." },
+        }));
+        return;
+      }
+      const candidate = result.widget;
+      const validation = validateRefreshCandidate(existing, candidate);
+      if (!validation.compatible) {
+        setRefreshNotices((current) => ({
+          ...current,
+          [id]: { tone: "error", message: `Refresh blocked: ${validation.reason}` },
+        }));
+        return;
+      }
+      if (!validation.changed) {
+        setRefreshNotices((current) => ({
+          ...current,
+          [id]: { tone: "neutral", message: `Source checked${candidate.dataQuality?.coverageEnd ? ` through ${candidate.dataQuality.coverageEnd}` : ""}. No new or revised observations; the widget was not changed.` },
+        }));
+        return;
       }
       setWidgets((current) => current.map((widget) =>
         widget.id === id
-          ? { ...result.widget!, id, originalQuery: existing.originalQuery, isDemo: false }
+          ? { ...candidate, id, originalQuery: existing.originalQuery, isDemo: false }
           : widget,
       ));
-    } catch (error) {
-      setRefreshErrors((current) => ({
+      const advanced = Boolean(
+        candidate.dataQuality?.coverageEnd
+        && existing.dataQuality?.coverageEnd
+        && candidate.dataQuality.coverageEnd > existing.dataQuality.coverageEnd,
+      );
+      setRefreshNotices((current) => ({
         ...current,
-        [id]: error instanceof Error ? error.message : "Refresh failed. Old data was kept.",
+        [id]: {
+          tone: "success",
+          message: advanced
+            ? `Updated with verified observations through ${candidate.dataQuality?.coverageEnd}.`
+            : `Updated with revised source observations${candidate.dataQuality?.coverageEnd ? ` through ${candidate.dataQuality.coverageEnd}` : ""}.`,
+        },
+      }));
+    } catch (error) {
+      setRefreshNotices((current) => ({
+        ...current,
+        [id]: {
+          tone: "error",
+          message: error instanceof Error ? error.message : "Refresh failed. Old data was kept.",
+        },
       }));
     } finally {
       setRefreshingIds((current) => {
@@ -365,6 +436,11 @@ export function AppShell() {
         layout?.filter((item) => item.i !== id),
       ]),
     ));
+    setRefreshNotices((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
   }, []);
 
   const loadDemo = useCallback(() => {
@@ -384,7 +460,7 @@ export function AppShell() {
     setLayouts({});
     setMessages([]);
     setConversationContext("");
-    setRefreshErrors({});
+    setRefreshNotices({});
     setLastFailedRequest(null);
   }, []);
 
@@ -422,7 +498,7 @@ export function AppShell() {
             widgets={widgets}
             layouts={layouts}
             refreshingIds={refreshingIds}
-            refreshErrors={refreshErrors}
+            refreshNotices={refreshNotices}
             onLayoutsChange={setLayouts}
             onDelete={deleteWidget}
             onRefresh={refreshWidget}
@@ -436,6 +512,7 @@ export function AppShell() {
         messages={messages}
         loadingStage={loadingStage}
         userDataset={userDataset}
+        dashboardWidgetCount={widgets.length}
         onToggle={() => setChatCollapsed((value) => !value)}
         onClear={clearConversation}
         onQueryChange={setQuery}

@@ -252,7 +252,10 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .widget-footer time { flex: 0 0 auto; color: var(--dim); font-family: var(--font-geist-mono), monospace; font-size: 8px; }
 .coverage-stat { flex: 0 0 auto; color: #d7a84e; font-family: var(--font-geist-mono), monospace; font-size: 8px; white-space: nowrap; }
 .coverage-stat.complete { color: #5fc7a3; }
-.widget-error { position: absolute; left: 10px; right: 10px; bottom: 43px; padding: 7px 9px; color: #fecdd3; border: 1px solid rgba(251, 113, 133, .35); border-radius: 7px; background: rgba(61, 17, 27, .94); font-size: 9px; }
+.widget-refresh-notice { position: absolute; z-index: 5; left: 10px; right: 10px; bottom: 43px; padding: 7px 9px; border: 1px solid; border-radius: 7px; backdrop-filter: blur(10px); font-size: 9px; }
+.widget-refresh-notice.error { color: #fecdd3; border-color: rgba(251, 113, 133, .35); background: rgba(61, 17, 27, .94); }
+.widget-refresh-notice.neutral { color: #cbd5e1; border-color: rgba(148, 163, 184, .28); background: rgba(25, 34, 43, .95); }
+.widget-refresh-notice.success { color: #bbf7d0; border-color: rgba(74, 222, 128, .3); background: rgba(12, 50, 32, .95); }
 
 .widget-focus-open { overflow: hidden; }
 .widget-focus-backdrop {
