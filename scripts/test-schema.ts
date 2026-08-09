@@ -395,4 +395,17 @@ try {
   globalThis.fetch = originalFetch;
 }
 
+try {
+  globalThis.fetch = async () => new Response("unavailable", { status: 503 });
+  const snapshotFallback = await resolveOfficialConnector("过去十年美国每月失业率");
+  assert.equal(snapshotFallback.status, "success", "a simultaneous BLS/FRED outage should use the versioned verified snapshot");
+  if (snapshotFallback.status === "success") {
+    assert.equal(snapshotFallback.result.widget.rows.length, 120, "the emergency snapshot should preserve the requested rolling history");
+    assert.match(snapshotFallback.result.message, /快照|snapshot/i, "snapshot delivery must be disclosed in the answer");
+    assert.match(snapshotFallback.result.widget.dataQuality?.scope ?? "", /snapshot/i, "snapshot provenance must be recorded in data quality metadata");
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 console.log("Polaris schema, connector fallback, conversation continuity, provenance, refresh, and agent-policy tests passed.");

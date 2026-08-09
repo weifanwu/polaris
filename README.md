@@ -94,7 +94,7 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
 - Falls back to bounded research only when no exact connector is supported. A matched connector outage remains a typed outage and never masquerades as “no connector.”
 - Retries transient connector timeouts, rate limits, and 5xx responses once with a bounded delay; permanent 4xx responses are never retried.
-- Splits BLS histories into API-compliant calendar-year windows, uses FRED's BLS-sourced `UNRATE` series as a deterministic unemployment fallback, and opens a short source circuit breaker after transient BLS failures.
+- Splits BLS histories into API-compliant calendar-year windows, uses FRED's BLS-sourced `UNRATE` series as a deterministic unemployment fallback, opens a short source circuit breaker after transient BLS failures, and keeps a versioned 120-month official snapshot as the last production-safe fallback when both live endpoints are unreachable. Snapshot coverage and verification time are always disclosed.
 - Searches for the exact requested slice first, then honestly labelled proxy measures; it never relabels a national aggregate as an industry or occupation result.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
 
@@ -206,7 +206,7 @@ The detailed design and connector contract are documented in [docs/ARCHITECTURE.
 | Bank of Canada Valet | Policy rate, Bank Rate, CORRA, prime and mortgage rates, Government of Canada bond yields, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
 | World Bank Indicators | Cross-country GDP, growth, population, inflation, unemployment, life expectancy, emissions, trade, debt, internet use, and fertility | Official JSON API | Country comparison, annual alignment, missing-observation checks, annual change calculation |
 | World Bank Pink Sheet | Gold, silver, energy, metals, and major agricultural commodities | Official monthly XLSX | Sheet discovery, unit extraction, rolling period selection, MoM/YoY calculation |
-| U.S. Bureau of Labor Statistics | U.S. CPI/core CPI, unemployment, participation, nonfarm payrolls, employment, and average hourly earnings | Official JSON API; FRED `UNRATE` structured fallback for unemployment | Calendar-window splitting, monthly alignment, seasonal-series selection, outage circuit breaking, MoM/YoY calculation |
+| U.S. Bureau of Labor Statistics | U.S. CPI/core CPI, unemployment, participation, nonfarm payrolls, employment, and average hourly earnings | Official JSON API; FRED `UNRATE` structured fallback; versioned 120-month BLS/FRED emergency snapshot | Calendar-window splitting, monthly alignment, seasonal-series selection, outage circuit breaking, explicit snapshot provenance, MoM/YoY calculation |
 
 Connectors are tried in a fixed registry and must return the same validated `WidgetSpec` as the research route. This keeps rendering independent from how data was acquired and makes additional sources straightforward to add without expanding the model prompt.
 

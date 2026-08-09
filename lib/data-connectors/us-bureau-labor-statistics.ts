@@ -1,6 +1,7 @@
 import { ConnectorUnavailableError, type DataConnector } from "./types";
 import { hasSubnationalGeography } from "./query-capabilities";
 import { fetchWithTransientRetry } from "./http";
+import { US_UNEMPLOYMENT_SNAPSHOT } from "./us-unemployment-snapshot";
 import {
   isChineseQuery,
   requestedCalculation,
@@ -146,6 +147,7 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
     const startYear = endYear - Math.ceil(lookbackMonths / 12);
     let rawRows: RawRow[];
     let deliveredViaFred = false;
+    let deliveredViaSnapshot = false;
 
     try {
       if (Date.now() < blsUnavailableUntil) {
@@ -177,6 +179,10 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
         rawRows = await fetchFredRows(series.fredId, startYear, endYear);
         deliveredViaFred = true;
       } catch (fredError) {
+        if (series.id === "LNS14000000" && US_UNEMPLOYMENT_SNAPSHOT.rows.length >= 2) {
+          rawRows = US_UNEMPLOYMENT_SNAPSHOT.rows.map((row) => ({ ...row }));
+          deliveredViaSnapshot = true;
+        } else {
         throw new ConnectorUnavailableError({
           connectorId: "us-bls-public-data-api",
           sourceName: "U.S. Bureau of Labor Statistics",
@@ -188,6 +194,7 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
             : {}),
           cause: fredError,
         });
+        }
       }
     }
 
@@ -210,7 +217,11 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
       : "";
 
     return {
-      message: deliveredViaFred
+      message: deliveredViaSnapshot
+        ? (chinese
+            ? `BLS 与 FRED 实时接口暂时不可用；已使用 ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)} 核验并随版本保存的 BLS/FRED 官方快照，返回 ${availablePoints}/${rows.length} 个数据点；未使用模型或网页搜索。`
+            : `The live BLS and FRED endpoints were unavailable; returned ${availablePoints}/${rows.length} observations from the BLS/FRED official snapshot verified on ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)}, with no model or Web Search call.`)
+        : deliveredViaFred
         ? (chinese
             ? `BLS 官方 API 暂时不可用；已通过 FRED 的 BLS 镜像数据校验 ${availablePoints}/${rows.length} 个数据点，未使用模型或网页搜索。`
             : `The BLS API was temporarily unavailable; validated ${availablePoints}/${rows.length} observations through FRED's BLS-sourced series with no model or Web Search call.`)
@@ -219,7 +230,7 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
             : `Validated ${availablePoints}/${rows.length} observations through the U.S. BLS Public Data API with no model or Web Search call.`),
       widget: {
         title: `${label}${calculation === "level" ? "" : calculation === "mom" ? " · MoM" : " · YoY"}`,
-        subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · ${series.id} · seasonally adjusted${deliveredViaFred ? " · BLS data via FRED" : ""}`,
+        subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · ${series.id} · seasonally adjusted${deliveredViaSnapshot ? ` · verified snapshot ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt.slice(0, 10)}` : deliveredViaFred ? " · BLS data via FRED" : ""}`,
         visualization: "line_chart",
         columns: [
           { key: "date", label: chinese ? "月份" : "Month", dataType: "date", unit: null },
@@ -227,7 +238,7 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
         ],
         rows: rows.map((row) => ({ cells: [row.date, toFixedCell(row.value, calculation === "level" ? series.decimals : 2)] })),
         summary,
-        sources: deliveredViaFred && series.fredId
+        sources: (deliveredViaFred || deliveredViaSnapshot) && series.fredId
           ? [
               { title: `FRED ${series.fredId} (source: BLS)`, url: `https://fred.stlouisfed.org/series/${series.fredId}` },
               { title: `BLS series ${series.id}`, url: `https://data.bls.gov/timeseries/${series.id}` },
@@ -245,8 +256,12 @@ export const usBureauLaborStatisticsConnector: DataConnector = {
           coverageStart: rows[0].date,
           coverageEnd: rows.at(-1)!.date,
           frequency: "monthly",
-          verifiedAt: new Date().toISOString(),
-          ...(deliveredViaFred ? { scope: "BLS observations delivered through the FRED structured-data mirror after a transient BLS API failure." } : {}),
+          verifiedAt: deliveredViaSnapshot ? US_UNEMPLOYMENT_SNAPSHOT.fetchedAt : new Date().toISOString(),
+          ...(deliveredViaSnapshot
+            ? { scope: `Live BLS and FRED endpoints unavailable; using a versioned official snapshot verified ${US_UNEMPLOYMENT_SNAPSHOT.fetchedAt} through ${US_UNEMPLOYMENT_SNAPSHOT.coverageEnd}. Refresh will prefer live sources.` }
+            : deliveredViaFred
+              ? { scope: "BLS observations delivered through the FRED structured-data mirror after a transient BLS API failure." }
+              : {}),
         },
       },
     };
