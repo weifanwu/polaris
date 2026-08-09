@@ -36,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "Polaris — Ask questions. Get evidence-backed dashboards.",
       description,
       type: "website",
-      images: [{ url: imageUrl, width: 1200, height: 630, alt: "北极星 Polaris dashboard preview" }],
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: "Polaris data intelligence workspace preview" }],
     },
     twitter: {
       card: "summary_large_image",

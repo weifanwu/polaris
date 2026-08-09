@@ -25,7 +25,7 @@
 
 Polaris is a data analysis workspace for questions that are too specific for a generic chart generator and too repetitive for a spreadsheet workflow. Ask a question in natural language, upload a CSV, XLSX, JSON, text table, or PDF, and Polaris produces a reusable widget with interactive visualization, evidence, data-quality metadata, and an analytical readout.
 
-The system combines deterministic official-data connectors, downloadable-file parsing, bounded web research, multi-turn context, strict output validation, and a quantitative Insight Engine. The goal is not simply to draw a chart. It is to create an answer you can inspect, refresh, challenge, and continue analyzing.
+The system combines deterministic official-data connectors, downloadable-file parsing, bounded web research, isolated multi-dashboard memory, strict output validation, and a hybrid LLM Insight Engine grounded in reproducible statistics. The goal is not simply to draw a chart. It is to create an answer you can inspect, refresh, challenge, and continue analyzing.
 
 > Polaris is public source code licensed for personal, educational, research, government, charitable, and other noncommercial use. Commercial use is not permitted under the included license.
 
@@ -45,8 +45,9 @@ Polaris treats data acquisition, identity resolution, transformation, analysis, 
 - Follow direct links to downloadable CSV, XLS, XLSX, TSV, JSON, TXT, and PDF files.
 - Route common requests directly to official structured data with no model call and no Web Search.
 - Preserve follow-up decisions through compact conversation memory, including metric, geography, frequency, units, and previously selected definitions.
+- Create, rename, switch, and delete focused dashboards; every dashboard owns its widgets, layout, conversation history, and agent context.
 - Research fragmented comparison series independently, align dates deterministically, and preserve missing observations as gaps.
-- Produce quantitative insights beyond first-versus-last: dated peaks and troughs, largest adjacent-period moves, recent momentum, cross-series spreads, coverage, and causal limits.
+- Produce professional LLM analysis grounded in deterministic evidence: dated peaks and troughs, largest adjacent-period moves, recent momentum, cross-series spreads, hypotheses, coverage, and causal limits.
 - Mark explicitly requested interpolated values as `unverified`; observed and hypothetical cells are never visually conflated.
 - Drag, resize, expand, refresh, and remove dashboard widgets.
 - Refresh a widget only through its original source and update it only when verified data changed.
@@ -81,8 +82,9 @@ flowchart LR
   F --> T
   W --> T
   T --> V["Widget contract validation"]
-  V --> A["Quantitative Insight Engine"]
-  A --> D["Interactive dashboard"]
+  V --> E["Deterministic evidence packet"]
+  E --> A["Bounded LLM Insight Engine"]
+  A --> D["Isolated dashboard workspace"]
   D --> X["Source-locked refresh"]
   X --> R
 ```
@@ -101,7 +103,7 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the connector contract an
 
 ## Insight Engine
 
-`POLARIS INSIGHTS` is produced from the final validated rows, not from a generic chart-caption template. The engine calculates reproducible observations such as:
+`POLARIS INSIGHTS` is produced in two explicit stages after the widget contract has passed. First, code calculates a compact evidence packet from the final rendered rows:
 
 - latest value and full-window change;
 - high and low points with dates;
@@ -111,7 +113,20 @@ See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the connector contract an
 - missing, observed, and explicitly unverified counts; and
 - a clear boundary between what the data shows and any causal explanation.
 
-For file and research routes, the model is prompted to add decision-relevant interpretation, regime shifts, comparisons, and limitations. Deterministic calculations then anchor that interpretation to the rendered data. This design improves analytical depth without adding a second model call to every official connector request.
+Second, `gpt-5.6-sol` receives only that evidence packet, the bounded active-dashboard metadata, compact conversation state, and up to four recent turns. A dedicated analyst prompt asks it to identify decision-relevant regime shifts, momentum, divergence, alternative explanations, tests for those hypotheses, and the evidence boundary. Numeric claims must come from the deterministic packet; professional knowledge may frame hypotheses but cannot invent events, causes, or values. If the interpretation call fails or no model key is configured, Polaris safely falls back to the reproducible statistical summary without changing the data.
+
+This separation prevents a polished narrative from overriding the chart and avoids sending full dashboard tables back through the model.
+
+## Multi-dashboard workspaces
+
+A Polaris workspace can contain up to 12 named dashboards. Each dashboard persists its own:
+
+- widget collection and responsive layout;
+- compact conversation memory and recent chat history;
+- metadata and statistical fingerprints sent to the agent; and
+- source-locked refresh state for its widgets.
+
+Only the active dashboard is included in an agent request. An `Economy` dashboard therefore cannot leak its charts or conversation into a `Stocks` dashboard, while the active dashboard name itself provides a small subject hint even before its first widget is created. Existing single-dashboard browser storage migrates automatically into `My Dashboard`.
 
 ## Official data connectors
 
@@ -169,15 +184,15 @@ While a request is running, the interface uses a neutral working state. It does 
 
 ## Cost-aware execution
 
-| Route | Default model | Search budget |
-| --- | --- | --- |
-| Exact official connector | None | 0 |
-| Intent and context resolution | `gpt-5.6-luna` | 0 |
-| Direct file analysis | `gpt-5.6-sol` | 0 |
-| Direct web lookup | `gpt-5.6-terra` | Up to 3 |
-| Fragmented multi-source research | `gpt-5.6-sol` | Up to 6 |
+| Route | Acquisition / planning | Insight pass | Search budget |
+| --- | --- | --- | --- |
+| Exact official connector | Deterministic code | `gpt-5.6-sol` | 0 |
+| Intent and context resolution | `gpt-5.6-luna` | — | 0 |
+| Direct file analysis | `gpt-5.6-sol` | `gpt-5.6-sol` | 0 |
+| Direct web lookup | `gpt-5.6-terra` | `gpt-5.6-sol` | Up to 3 |
+| Fragmented multi-source research | `gpt-5.6-sol` planning + `gpt-5.6-terra` series workers | `gpt-5.6-sol` | Up to 6 |
 
-Stable prompt prefixes and cache keys improve cached-input reuse. Dashboard context is compact metadata plus statistical fingerprints, not full tables. Recent chat turns, conversation state, search context, file size, and model output are all bounded independently.
+Stable prompt prefixes and cache keys improve cached-input reuse. Only the active dashboard contributes compact metadata and statistical fingerprints; full dashboard tables are never sent as ambient context. The LLM Insight Engine uses at most 18 representative rows plus deterministic statistics. Recent chat turns, conversation state, search context, file size, and model output are all bounded independently.
 
 ## Quick start
 

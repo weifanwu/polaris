@@ -101,12 +101,12 @@ export function buildReferencedWidgetDataset(widgets: WidgetSpec[], query: strin
   };
 }
 
-export function buildDashboardContext(widgets: WidgetSpec[], query: string) {
-  if (!widgets.length) return "";
+export function buildDashboardContext(widgets: WidgetSpec[], query: string, dashboardName = "My Dashboard") {
   const expanded = queryReferencesDashboard(query);
   const budget = expanded ? MAX_DASHBOARD_CONTEXT_CHARS : BASE_CONTEXT_CHARS;
+  const safeDashboardName = clean(dashboardName, 40) || "My Dashboard";
   const lines = [
-    `Dashboard snapshot: ${widgets.length} widget${widgets.length === 1 ? "" : "s"}. ${expanded ? "Compact metadata plus boundary observations; no full raw tables." : "Metadata index only; no raw rows."}`,
+    `Active dashboard: "${safeDashboardName}". Dashboard snapshot: ${widgets.length} widget${widgets.length === 1 ? "" : "s"}. ${expanded ? "Compact metadata plus boundary observations; no full raw tables." : "Metadata index only; no raw rows."}`,
   ];
 
   for (const widget of widgets) {

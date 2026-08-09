@@ -20,13 +20,14 @@ import {
 import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { listWorksheetNames } from "../lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, parseUserDataset, remoteDatasetFromUrl } from "../lib/user-dataset";
-import { buildWidgetInsights } from "../lib/insight-engine";
+import { buildInsightEvidencePacket, buildWidgetInsights } from "../lib/insight-engine";
 import { fetchWithTransientRetry } from "../lib/data-connectors/http";
 import { buildDashboardContext, buildReferencedWidgetDataset, MAX_DASHBOARD_CONTEXT_CHARS, parseDashboardContext, queryReferencesDashboard, queryReferencesDataset } from "../lib/dashboard-context";
 import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { applyRequestedHypotheses } from "../lib/hypothesis-data";
 import { resolveOfficialConnector } from "../lib/data-connectors";
+import { migrateWorkspace, normalizeDashboardName } from "../lib/storage";
 import { strToU8, zipSync } from "fflate";
 
 const valid = {
@@ -62,8 +63,9 @@ const parsedValidWidget = widgetSpecSchema.parse(valid);
 const compactDashboard = buildDashboardContext([
   parsedValidWidget,
   { ...parsedValidWidget, id: "second-widget", title: "Second dashboard series", originalQuery: "second question" },
-], "What is the latest inflation rate?");
+], "What is the latest inflation rate?", "Economy");
 assert.match(compactDashboard, /2 widgets/, "dashboard context should report the widget count");
+assert.match(compactDashboard, /Active dashboard: "Economy"/, "dashboard context should preserve the active workspace identity");
 assert.match(compactDashboard, /Test series/, "dashboard context should include every widget title");
 assert.match(compactDashboard, /Second dashboard series/, "dashboard context should include later widget metadata");
 assert.doesNotMatch(compactDashboard, /first:/, "unrelated questions should receive metadata only");
@@ -74,6 +76,23 @@ assert.match(expandedDashboard, /latest:/, "dashboard-referential questions shou
 assert.ok(expandedDashboard.length <= MAX_DASHBOARD_CONTEXT_CHARS, "dashboard context must stay within the input budget");
 assert.equal(parseDashboardContext("x".repeat(MAX_DASHBOARD_CONTEXT_CHARS + 100)).length, MAX_DASHBOARD_CONTEXT_CHARS, "server dashboard context must be bounded independently");
 assert.equal(queryReferencesDataset("这个是美国失业率数据，帮我重新画"), true, "dataset redraw requests should resolve to dashboard data");
+
+const emptyNamedDashboard = buildDashboardContext([], "What should I track?", "Stocks");
+assert.match(emptyNamedDashboard, /Active dashboard: "Stocks"/, "an empty dashboard should still provide a bounded subject hint");
+
+const migratedWorkspace = migrateWorkspace({
+  version: 2,
+  activeDashboardId: "stocks",
+  dashboards: [
+    { id: "economy", name: "Economy", widgets: [parsedValidWidget], layouts: {}, messages: [], conversationContext: "macro context" },
+    { id: "stocks", name: "Stocks", widgets: [], layouts: {}, messages: [{ id: "m1", role: "user", content: "MSFT" }], conversationContext: "equity context" },
+  ],
+});
+assert.equal(migratedWorkspace?.dashboards.length, 2, "multi-dashboard storage should preserve isolated workspaces");
+assert.equal(migratedWorkspace?.activeDashboardId, "stocks", "multi-dashboard storage should preserve the active workspace");
+assert.equal(migratedWorkspace?.dashboards[0].conversationContext, "macro context", "dashboard conversation memory should remain isolated");
+assert.equal(migratedWorkspace?.dashboards[1].conversationContext, "equity context", "a second dashboard should retain its own memory");
+assert.equal(normalizeDashboardName("  Market   Research  "), "Market Research", "dashboard names should be compact and safe");
 
 const refreshContextFixture = buildRefreshContext(parsedValidWidget);
 assert.deepEqual(parseRefreshContext(refreshContextFixture), refreshContextFixture, "refresh identity metadata should round-trip through the server parser");
@@ -361,6 +380,10 @@ const insight = buildWidgetInsights(insightFixture);
 assert.match(insight, /2020-04/, "analysis should identify the dated peak instead of only comparing endpoints");
 assert.match(insight, /最大相邻期变化/, "analysis should quantify the largest adjacent-period shift");
 assert.match(insight, /不把.*因果/, "analysis should state its causal boundary");
+const evidencePacket = buildInsightEvidencePacket(insightFixture);
+assert.equal(evidencePacket.representativeRows.length, 4, "the LLM evidence packet should retain all rows for a compact series");
+assert.match(evidencePacket.deterministicEvidence, /14.8/, "the LLM evidence packet should be grounded in deterministic statistics");
+assert.equal(evidencePacket.dataset.coverage.unverified, 0, "the LLM evidence packet should disclose unverified cell counts");
 
 const workbook = zipSync({
   "xl/workbook.xml": strToU8('<?xml version="1.0"?><workbook><sheets><sheet name="Monthly Prices" r:id="rId2"/></sheets></workbook>'),

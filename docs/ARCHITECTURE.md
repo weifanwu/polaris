@@ -28,8 +28,9 @@ flowchart TD
     F -->|"exact series found"| G
     G --> H["Align dates and calculate"]
     H --> I["Validate schema, units, gaps, and coverage"]
-    I --> N["Deterministic quantitative Insight Engine"]
-    N --> J["Compile ECharts option"]
+    I --> N["Deterministic evidence packet"]
+    N --> L["Bounded LLM Insight Engine"]
+    L --> J["Compile ECharts option"]
     J --> K["Interactive dashboard widget"]
 ```
 
@@ -46,11 +47,11 @@ Polaris therefore prefers this order:
 5. Preserve unavailable observations as `null`/empty cells.
 6. Route direct or discovered downloadable files through the Responses API file-input pipeline.
 7. Validate the complete widget contract and record coverage metadata.
-8. Generate deterministic quantitative insights from the exact rendered rows.
+8. Generate deterministic quantitative evidence from the exact rendered rows, then run a bounded LLM interpretation pass.
 9. Decompose fragmented multi-source questions into independent series before Web Search.
 10. Allow a user-supplied dataset to bypass discovery when the web cannot provide the rows.
 
-This lowers cost because a direct connector request sends no dataset through a model. It improves completeness because row count is limited by the product schema rather than search-result context. It improves accuracy because formulas and date joins are testable code.
+This lowers cost because a direct connector request sends only a compact evidence packet—not the full dataset—through the Insight Engine model. It improves completeness because row count is limited by the product schema rather than search-result context. It improves accuracy because formulas and date joins are testable code.
 
 ## Connector contract
 
@@ -111,9 +112,9 @@ The IRCC connector downloads the official `Permanent Residents – Monthly IRCC 
 
 ## Insight Engine
 
-After provenance and shape validation, every successful widget passes through a deterministic analytical layer. For each numeric series it calculates the current and full-window change, dated high and low points, valid adjacent-period shocks, and a frequency-aware recent window. Multi-series widgets add a latest-common-period ranking and spread. The output always states coverage and excludes `unverified` cells from observed statistics. Existing model analysis is retained as context only when it contributes additional information.
+After provenance and shape validation, every successful widget passes through a deterministic evidence layer. For each numeric series it calculates the current and full-window change, dated high and low points, valid adjacent-period shocks, and a frequency-aware recent window. Multi-series widgets add a latest-common-period ranking and spread. The packet always states coverage, excludes `unverified` cells from observed statistics, and contains no more than 18 representative rows.
 
-This layer deliberately makes no causal attribution. A time-series break can be identified from rows; explaining why it occurred requires separately retrieved evidence. Running the engine after validation makes the analysis reproducible and adds no model call to connector requests.
+`gpt-5.6-sol` then interprets that packet with the active dashboard's bounded metadata, compact conversation state, and at most four recent turns. The analyst prompt requests decision-relevant regime shifts, recent momentum, divergence, professional domain lenses, alternative hypotheses, tests for those hypotheses, and the evidence boundary. Numeric claims must come from the packet. Domain knowledge may frame hypotheses but cannot invent values, events, or causal findings. If the model pass fails or no key is configured, the deterministic evidence summary remains the safe fallback and the widget data is never modified.
 
 ## Chart compiler
 
@@ -139,9 +140,11 @@ CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in t
 
 Raw uploads are not added to dashboard storage. The analysis route treats the dataset as inert untrusted content and receives both compact resolved state and at most six bounded recent turns. Its result builds a fresh 500-character dataset identity from the request, chart title, coverage, columns, units, and prior confirmed context. This prevents a generic follow-up from erasing facts such as “U.S. monthly unemployment.” Its output enters the same `WidgetSpec` validator, Insight Engine, and chart compiler.
 
-## Dashboard context envelope
+## Multi-dashboard context envelope
 
-The dashboard is part of the agent's workspace, but sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from all current widgets. Ordinary questions receive a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the dashboard, existing charts, or tables above may expand to 4,200 characters and add a statistical fingerprint (latest, low, and high for up to three numeric series), bounded analysis, and first/latest row previews. Full raw tables are never included automatically.
+Each named dashboard is a separate agent workspace with its own widgets, responsive layouts, recent chat history, and compact conversation memory. The browser persists up to 12 dashboards and automatically migrates the legacy single-dashboard state. Switching dashboards changes all four together, so an economic workspace cannot leak context into a stock workspace.
+
+Sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from only the active dashboard. Ordinary questions receive its name plus a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the active dashboard, existing charts, or tables above may expand to 4,200 characters and add a statistical fingerprint (latest, low, and high for up to three numeric series), bounded analysis, and first/latest row previews. Full raw tables are never included automatically.
 
 The server independently enforces the 4,200-character ceiling and places the snapshot in a delimited developer message that labels it inert, user-controlled metadata. Intent resolution may use it to resolve phrases such as "the chart above"; research may use it to preserve continuity. When a prompt explicitly asks to redraw or transform an existing dataset, the client selects the most relevant widget and serializes only its bounded table as transient user data. Unverified hypothesis cells are blanked before this reuse so they cannot silently become observations. New factual claims still require connector or Web Search evidence.
 

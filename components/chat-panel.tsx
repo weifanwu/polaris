@@ -7,9 +7,9 @@ import { MAX_USER_DATA_CHARS, MAX_USER_FILE_BYTES, userDatasetSizeLabel, type Us
 import type { ChatMessage } from "@/types";
 
 export const examplePrompts = [
-  "比较过去两年加拿大和安大略省每月失业率",
-  "过去两年多伦多和渥太华新房价格指数每月环比",
-  "比较过去10年加拿大、美国和中国的GDP",
+  "Compare Canada and Ontario monthly unemployment over the last 10 years",
+  "Compare Toronto and Ottawa monthly new-housing price changes",
+  "Analyze the last decade of GDP growth across Canada, the U.S., and China",
 ];
 
 type Props = {
@@ -19,6 +19,7 @@ type Props = {
   loadingStage: "working" | "analyzing" | null;
   userDataset: UserDataset | null;
   dashboardWidgetCount: number;
+  dashboardName: string;
   onToggle: () => void;
   onClear: () => void;
   onQueryChange: (query: string) => void;
@@ -34,6 +35,7 @@ export function ChatPanel({
   loadingStage,
   userDataset,
   dashboardWidgetCount,
+  dashboardName,
   onToggle,
   onClear,
   onQueryChange,
@@ -265,7 +267,7 @@ export function ChatPanel({
           {userDataset
             ? "Your attached data is used for this analysis only."
             : dashboardWidgetCount > 0
-              ? `${dashboardWidgetCount} dashboard widget${dashboardWidgetCount === 1 ? "" : "s"} included as compact metadata context · no full tables sent`
+              ? `${dashboardWidgetCount} widget${dashboardWidgetCount === 1 ? "" : "s"} from “${dashboardName}” included as compact metadata context · no full tables sent`
               : "Polaris can make mistakes. Verify important data at the source."}
         </p>
       </div>

@@ -1,13 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type SetStateAction } from "react";
 import type { LayoutItem, ResponsiveLayouts } from "react-grid-layout";
 import { Activity, Clock3 } from "lucide-react";
 import { ChatPanel } from "./chat-panel";
 import { DashboardGrid } from "./dashboard-grid";
 import { Sidebar } from "./sidebar";
 import { buildDashboardContext, buildReferencedWidgetDataset } from "@/lib/dashboard-context";
-import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
+import {
+  createDashboard,
+  emptyWorkspace,
+  loadWorkspace,
+  normalizeDashboardName,
+  saveWorkspace,
+  type StoredDashboard,
+  type StoredWorkspace,
+} from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
 import { buildRefreshContext, validateRefreshCandidate, type RefreshContext } from "@/lib/widget-refresh";
 import type { AgentTrace, GenerateWidgetResult } from "@/lib/widget-schema";
@@ -45,6 +53,10 @@ function addWidgetToLayouts(
   return next;
 }
 
+function resolveState<T>(value: SetStateAction<T>, current: T) {
+  return typeof value === "function" ? (value as (previous: T) => T)(current) : value;
+}
+
 async function requestWidget(
   query: string,
   conversationContext = "",
@@ -80,7 +92,7 @@ async function requestWidget(
   };
   if (!response.ok) {
     throw new PolarisRequestError({
-      message: payload.error || "查询失败。",
+      message: payload.error || "The request failed.",
       code: payload.code || "request_failed",
       detail: payload.detail,
       requestId: payload.requestId,
@@ -135,21 +147,16 @@ const EXPLAIN_FAILURE_PATTERN = /(?:为什么|为何|怎么).*(?:失败|错误)|
 
 function explainFailure(failure: FailedRequest) {
   const error = failure.error;
-  const identity = error.requestId ? `错误编号 ${error.requestId}。` : "";
+  const identity = error.requestId ? ` Request ID: ${error.requestId}.` : "";
   const nextStep = error.retryable
-    ? "这类错误可以重试；发送“重试”会重放原始请求，不会把“重试”当成新数据问题。"
-    : "原始请求已保留，但建议先按错误详情修正后再试。";
-  return `上一次失败不是数据结论，而是 ${error.code}：${error.message}${error.detail ? ` ${error.detail}` : ""} ${identity}${nextStep}`.trim();
+    ? " This error is retryable. Send “retry” to replay the original request instead of treating it as a new data question."
+    : " The original request is preserved, but its error details need to be addressed before retrying.";
+  return `The previous failure was not a data conclusion. It was ${error.code}: ${error.message}${error.detail ? ` ${error.detail}` : ""}${identity}${nextStep}`.trim();
 }
 
 export function AppShell() {
   const [hydrated, setHydrated] = useState(false);
-  const [widgets, setWidgets] = useState<DashboardWidget[]>(emptyDashboard.widgets);
-  const [layouts, setLayouts] = useState<ResponsiveLayouts>(emptyDashboard.layouts);
-  const [messages, setMessages] = useState<ChatMessage[]>(emptyDashboard.messages);
-  const [conversationContext, setConversationContext] = useState(
-    emptyDashboard.conversationContext,
-  );
+  const [workspace, setWorkspace] = useState<StoredWorkspace>(emptyWorkspace);
   const [query, setQuery] = useState("");
   const [userDataset, setUserDataset] = useState<UserDataset | null>(null);
   const [loadingStage, setLoadingStage] = useState<"working" | "analyzing" | null>(null);
@@ -160,12 +167,41 @@ export function AppShell() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [health, setHealth] = useState<ApiHealth>({ status: "error", model: null });
 
+  const activeDashboard = useMemo(
+    () => workspace.dashboards.find((dashboard) => dashboard.id === workspace.activeDashboardId)
+      ?? workspace.dashboards[0]
+      ?? emptyWorkspace.dashboards[0],
+    [workspace],
+  );
+  const widgets = activeDashboard.widgets;
+  const layouts = activeDashboard.layouts;
+  const messages = activeDashboard.messages;
+  const conversationContext = activeDashboard.conversationContext;
+
+  const updateActiveDashboard = useCallback((updater: (dashboard: StoredDashboard) => StoredDashboard) => {
+    setWorkspace((current) => ({
+      ...current,
+      dashboards: current.dashboards.map((dashboard) => dashboard.id === current.activeDashboardId
+        ? { ...updater(dashboard), updatedAt: new Date().toISOString() }
+        : dashboard),
+    }));
+  }, []);
+
+  const setWidgets = useCallback((value: SetStateAction<DashboardWidget[]>) => {
+    updateActiveDashboard((dashboard) => ({ ...dashboard, widgets: resolveState(value, dashboard.widgets) }));
+  }, [updateActiveDashboard]);
+  const setLayouts = useCallback((value: SetStateAction<ResponsiveLayouts>) => {
+    updateActiveDashboard((dashboard) => ({ ...dashboard, layouts: resolveState(value, dashboard.layouts) }));
+  }, [updateActiveDashboard]);
+  const setMessages = useCallback((value: SetStateAction<ChatMessage[]>) => {
+    updateActiveDashboard((dashboard) => ({ ...dashboard, messages: resolveState(value, dashboard.messages) }));
+  }, [updateActiveDashboard]);
+  const setConversationContext = useCallback((value: SetStateAction<string>) => {
+    updateActiveDashboard((dashboard) => ({ ...dashboard, conversationContext: resolveState(value, dashboard.conversationContext) }));
+  }, [updateActiveDashboard]);
+
   useEffect(() => {
-    const stored = loadDashboard();
-    setWidgets(stored.widgets);
-    setLayouts(stored.layouts);
-    setMessages(stored.messages);
-    setConversationContext(stored.conversationContext);
+    setWorkspace(loadWorkspace());
     setHydrated(true);
 
     fetch("/api/health")
@@ -176,8 +212,8 @@ export function AppShell() {
 
   useEffect(() => {
     if (!hydrated) return;
-    saveDashboard({ widgets, layouts, messages, conversationContext });
-  }, [conversationContext, hydrated, layouts, messages, widgets]);
+    saveWorkspace(workspace);
+  }, [hydrated, workspace]);
 
   const latestGeneratedAt = useMemo(() => {
     if (!widgets.length) return null;
@@ -225,13 +261,13 @@ export function AppShell() {
     const requestDataset = retrying ? lastFailedRequest!.userDataset : userDataset ?? contextualDataset;
     const requestDashboardContext = retrying
       ? lastFailedRequest!.dashboardContext
-      : buildDashboardContext(widgets, cleanQuery);
+      : buildDashboardContext(widgets, cleanQuery, activeDashboard.name);
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
       content: retrying
-        ? `重试上一次请求：${cleanQuery}`
+        ? `Retrying the previous request: ${cleanQuery}`
         : requestDataset
           ? `${cleanQuery}\n\n${requestDataset.origin === "dashboard" ? "Using dashboard data" : "Attached data"}: ${requestDataset.name}`
           : cleanQuery,
@@ -307,7 +343,7 @@ export function AppShell() {
       const failure = error instanceof PolarisRequestError
         ? error
         : new PolarisRequestError({
-          message: error instanceof Error ? error.message : "查询失败。",
+          message: error instanceof Error ? error.message : "The request failed.",
           code: "client_error",
           retryable: true,
         });
@@ -322,7 +358,7 @@ export function AppShell() {
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `${failure.message}${failure.requestId ? ` 错误编号：${failure.requestId}。` : ""}${failure.retryable ? " 可以发送“重试”重放原始请求。" : ""}`,
+        content: `${failure.message}${failure.requestId ? ` Request ID: ${failure.requestId}.` : ""}${failure.retryable ? " Send “retry” to replay the original request." : ""}`,
         tone: "error",
         trace: failure.trace,
       };
@@ -333,7 +369,7 @@ export function AppShell() {
     } finally {
       setLoadingStage(null);
     }
-  }, [conversationContext, lastFailedRequest, loadingStage, messages, query, userDataset, widgets]);
+  }, [activeDashboard.name, conversationContext, lastFailedRequest, loadingStage, messages, query, setConversationContext, setLayouts, setMessages, setWidgets, userDataset, widgets]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
@@ -421,7 +457,7 @@ export function AppShell() {
         return next;
       });
     }
-  }, [refreshingIds, widgets]);
+  }, [refreshingIds, setWidgets, widgets]);
 
   const deleteWidget = useCallback((id: string) => {
     setWidgets((current) => current.filter((widget) => widget.id !== id));
@@ -436,29 +472,97 @@ export function AppShell() {
       delete next[id];
       return next;
     });
-  }, []);
+  }, [setLayouts, setWidgets]);
 
   const clearDashboard = useCallback(() => {
-    setWidgets([]);
-    setLayouts({});
-    setMessages([]);
-    setConversationContext("");
+    updateActiveDashboard((dashboard) => ({
+      ...dashboard,
+      widgets: [],
+      layouts: {},
+      messages: [],
+      conversationContext: "",
+    }));
     setRefreshNotices({});
     setLastFailedRequest(null);
-  }, []);
+    setUserDataset(null);
+  }, [updateActiveDashboard]);
 
   const clearConversation = useCallback(() => {
     setMessages([]);
     setConversationContext("");
     setLastFailedRequest(null);
+  }, [setConversationContext, setMessages]);
+
+  const selectDashboard = useCallback((id: string) => {
+    if (id === workspace.activeDashboardId || loadingStage || refreshingIds.size) return;
+    if (!workspace.dashboards.some((dashboard) => dashboard.id === id)) return;
+    setWorkspace((current) => ({ ...current, activeDashboardId: id }));
+    setQuery("");
+    setUserDataset(null);
+    setLastFailedRequest(null);
+    setRefreshNotices({});
+  }, [loadingStage, refreshingIds.size, workspace.activeDashboardId, workspace.dashboards]);
+
+  const addDashboard = useCallback((name: string) => {
+    if (workspace.dashboards.length >= 12 || loadingStage || refreshingIds.size) return;
+    const dashboard = createDashboard(name);
+    setWorkspace((current) => ({
+      ...current,
+      activeDashboardId: dashboard.id,
+      dashboards: [...current.dashboards, dashboard],
+    }));
+    setQuery("");
+    setUserDataset(null);
+    setLastFailedRequest(null);
+    setRefreshNotices({});
+  }, [loadingStage, refreshingIds.size, workspace.dashboards.length]);
+
+  const renameDashboard = useCallback((id: string, name: string) => {
+    setWorkspace((current) => ({
+      ...current,
+      dashboards: current.dashboards.map((dashboard) => dashboard.id === id
+        ? { ...dashboard, name: normalizeDashboardName(name), updatedAt: new Date().toISOString() }
+        : dashboard),
+    }));
   }, []);
+
+  const deleteDashboard = useCallback((id: string) => {
+    if (loadingStage || refreshingIds.size) return;
+    const target = workspace.dashboards.find((dashboard) => dashboard.id === id);
+    if (!target || workspace.dashboards.length <= 1) return;
+    if (!window.confirm(`Delete “${target.name}” and its saved widgets and conversation?`)) return;
+    setWorkspace((current) => {
+      if (current.dashboards.length <= 1) return current;
+      const dashboards = current.dashboards.filter((dashboard) => dashboard.id !== id);
+      return {
+        ...current,
+        dashboards,
+        activeDashboardId: current.activeDashboardId === id ? dashboards[0].id : current.activeDashboardId,
+      };
+    });
+    setQuery("");
+    setUserDataset(null);
+    setLastFailedRequest(null);
+    setRefreshNotices({});
+  }, [loadingStage, refreshingIds.size, workspace.dashboards]);
 
   return (
     <main className="app-shell">
       <Sidebar
         collapsed={navCollapsed}
         health={health}
+        dashboards={workspace.dashboards.map((dashboard) => ({
+          id: dashboard.id,
+          name: dashboard.name,
+          widgetCount: dashboard.widgets.length,
+        }))}
+        activeDashboardId={activeDashboard.id}
+        busy={Boolean(loadingStage) || refreshingIds.size > 0}
         onToggle={() => setNavCollapsed((value) => !value)}
+        onSelect={selectDashboard}
+        onCreate={addDashboard}
+        onRename={renameDashboard}
+        onDelete={deleteDashboard}
         onClear={clearDashboard}
       />
 
@@ -466,8 +570,8 @@ export function AppShell() {
         <header className="dashboard-header">
           <div>
             <span className="eyebrow"><Activity size={13} /> LIVE WORKSPACE</span>
-            <h1>My Dashboard</h1>
-            <p>Real-time signals, shaped around your questions.</p>
+            <h1>{activeDashboard.name}</h1>
+            <p>One focused workspace, with its own data and agent memory.</p>
           </div>
           <div className="dashboard-stats">
             <div><span>WIDGETS</span><strong>{String(widgets.length).padStart(2, "0")}</strong></div>
@@ -495,6 +599,7 @@ export function AppShell() {
         loadingStage={loadingStage}
         userDataset={userDataset}
         dashboardWidgetCount={widgets.length}
+        dashboardName={activeDashboard.name}
         onToggle={() => setChatCollapsed((value) => !value)}
         onClear={clearConversation}
         onQueryChange={setQuery}

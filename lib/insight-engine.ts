@@ -205,3 +205,69 @@ export function buildWidgetInsights(widget: WidgetSpec, existingSummary = widget
 export function enrichWidgetInsights(widget: WidgetSpec) {
   return { ...widget, summary: buildWidgetInsights(widget) };
 }
+
+/**
+ * Creates a compact, bounded evidence packet for the LLM interpretation pass.
+ * Full tables stay out of the prompt; deterministic extrema and a small set of
+ * representative rows preserve the signal needed for professional analysis.
+ */
+export function buildInsightEvidencePacket(widget: WidgetSpec) {
+  const numericIndices = widget.columns.flatMap((column, index) =>
+    index > 0 && column.dataType === "number" ? [index] : [],
+  );
+  const selectedIndices = new Set<number>();
+  if (widget.rows.length) {
+    selectedIndices.add(0);
+    selectedIndices.add(widget.rows.length - 1);
+    for (let index = Math.max(0, widget.rows.length - 8); index < widget.rows.length; index += 1) {
+      selectedIndices.add(index);
+    }
+  }
+  for (const columnIndex of numericIndices.slice(0, 4)) {
+    const points = seriesPoints(widget, columnIndex);
+    if (!points.length) continue;
+    const low = points.reduce((best, point) => point.value < best.value ? point : best);
+    const high = points.reduce((best, point) => point.value > best.value ? point : best);
+    selectedIndices.add(low.rowIndex);
+    selectedIndices.add(high.rowIndex);
+    const move = largestMove(points, widget.dataQuality?.frequency ?? "unknown");
+    if (move) {
+      selectedIndices.add(move.from.rowIndex);
+      selectedIndices.add(move.to.rowIndex);
+    }
+  }
+  const rows = Array.from(selectedIndices)
+    .sort((left, right) => left - right)
+    .slice(-18)
+    .map((index) => ({
+      period: widget.rows[index]?.cells[0] ?? String(index + 1),
+      values: widget.columns.slice(1).map((column, offset) => ({
+        series: column.label,
+        value: widget.rows[index]?.cells[offset + 1] ?? "",
+        status: widget.rows[index]?.cellStatus?.[offset + 1] ?? "verified",
+      })),
+    }));
+
+  return {
+    dataset: {
+      title: widget.title,
+      subtitle: widget.subtitle,
+      visualization: widget.visualization,
+      columns: widget.columns.map((column) => ({ label: column.label, unit: column.unit, type: column.dataType })),
+      coverage: {
+        start: widget.dataQuality?.coverageStart ?? widget.rows[0]?.cells[0] ?? null,
+        end: widget.dataQuality?.coverageEnd ?? widget.rows.at(-1)?.cells[0] ?? null,
+        frequency: widget.dataQuality?.frequency ?? "unknown",
+        available: widget.dataQuality?.availablePoints ?? null,
+        requested: widget.dataQuality?.requestedPoints ?? null,
+        missing: widget.dataQuality?.missingPoints ?? null,
+        unverified: widget.dataQuality?.unverifiedPoints ?? 0,
+      },
+      source: widget.dataQuality?.sourceName ?? widget.sources[0]?.title ?? "User-supplied data",
+      scope: widget.dataQuality?.scope ?? null,
+    },
+    deterministicEvidence: buildWidgetInsights(widget, ""),
+    representativeRows: rows,
+    priorModelSummary: cleanExisting(widget.summary).slice(0, 800),
+  };
+}
