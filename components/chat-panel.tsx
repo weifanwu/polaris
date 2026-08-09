@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { Activity, ArrowUp, Bot, ChevronDown, ChevronRight, FileSpreadsheet, PanelRightClose, PanelRightOpen, Paperclip, Sparkles, Trash2, UserRound, X } from "lucide-react";
 import { listWorksheetNames, readWorksheet } from "@/lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, MAX_USER_FILE_BYTES, userDatasetSizeLabel, type UserDataset } from "@/lib/user-dataset";
@@ -11,6 +11,20 @@ export const examplePrompts = [
   "Compare Toronto and Ottawa monthly new-housing price changes",
   "Analyze the last decade of GDP growth across Canada, the U.S., and China",
 ];
+
+const CHAT_PANEL_STORAGE_KEY = "polaris-ui:chat-panel-width";
+const DEFAULT_CHAT_PANEL_WIDTH = 390;
+const MIN_CHAT_PANEL_WIDTH = 320;
+const MAX_CHAT_PANEL_WIDTH = 720;
+
+function maximumChatPanelWidth() {
+  if (typeof window === "undefined") return MAX_CHAT_PANEL_WIDTH;
+  return Math.max(MIN_CHAT_PANEL_WIDTH, Math.min(MAX_CHAT_PANEL_WIDTH, window.innerWidth - 620));
+}
+
+function clampChatPanelWidth(width: number) {
+  return Math.min(maximumChatPanelWidth(), Math.max(MIN_CHAT_PANEL_WIDTH, Math.round(width)));
+}
 
 type Props = {
   collapsed: boolean;
@@ -51,8 +65,64 @@ export function ChatPanel({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const resizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const [dataTrayOpen, setDataTrayOpen] = useState(false);
   const [dataError, setDataError] = useState("");
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
+  const [resizing, setResizing] = useState(false);
+
+  useEffect(() => {
+    const stored = Number(window.localStorage.getItem(CHAT_PANEL_STORAGE_KEY));
+    const restoreFrame = window.requestAnimationFrame(() => {
+      if (Number.isFinite(stored) && stored > 0) setPanelWidth(clampChatPanelWidth(stored));
+    });
+
+    const clampOnViewportChange = () => setPanelWidth((current) => clampChatPanelWidth(current));
+    window.addEventListener("resize", clampOnViewportChange);
+    return () => {
+      window.cancelAnimationFrame(restoreFrame);
+      window.removeEventListener("resize", clampOnViewportChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(CHAT_PANEL_STORAGE_KEY, String(panelWidth));
+  }, [panelWidth]);
+
+  function beginResize(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 780) return;
+    resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: panelWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizing(true);
+    event.preventDefault();
+  }
+
+  function continueResize(event: PointerEvent<HTMLDivElement>) {
+    const current = resizeRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    setPanelWidth(clampChatPanelWidth(current.startWidth + current.startX - event.clientX));
+  }
+
+  function finishResize(event: PointerEvent<HTMLDivElement>) {
+    const current = resizeRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resizeRef.current = null;
+    setResizing(false);
+  }
+
+  function resizeWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") next = panelWidth + 24;
+    if (event.key === "ArrowRight") next = panelWidth - 24;
+    if (event.key === "Home") next = MIN_CHAT_PANEL_WIDTH;
+    if (event.key === "End") next = maximumChatPanelWidth();
+    if (next === null) return;
+    event.preventDefault();
+    setPanelWidth(clampChatPanelWidth(next));
+  }
 
   async function attachFile(file: File) {
     setDataError("");
@@ -123,7 +193,28 @@ export function ChatPanel({
   }
 
   return (
-    <aside className="chat-panel">
+    <aside
+      className={`chat-panel${resizing ? " resizing" : ""}`}
+      style={{ "--chat-panel-width": `${panelWidth}px` } as CSSProperties}
+    >
+      <div
+        className="chat-resize-handle"
+        role="slider"
+        aria-label="Resize chat panel"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_CHAT_PANEL_WIDTH}
+        aria-valuemax={maximumChatPanelWidth()}
+        aria-valuenow={panelWidth}
+        aria-valuetext={`${panelWidth} pixels wide`}
+        tabIndex={0}
+        title="Drag to resize · double-click to reset"
+        onPointerDown={beginResize}
+        onPointerMove={continueResize}
+        onPointerUp={finishResize}
+        onPointerCancel={finishResize}
+        onKeyDown={resizeWithKeyboard}
+        onDoubleClick={() => setPanelWidth(clampChatPanelWidth(DEFAULT_CHAT_PANEL_WIDTH))}
+      ><span /></div>
       <header className="chat-header">
         <div><span>DATA AGENT</span><h2>Ask Polaris</h2></div>
         <div className="chat-header-actions">

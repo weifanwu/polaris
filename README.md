@@ -51,6 +51,7 @@ Polaris treats data acquisition, identity resolution, transformation, analysis, 
 - Produce professional LLM analysis grounded in deterministic evidence: dated peaks and troughs, largest adjacent-period moves, recent momentum, cross-series spreads, hypotheses, coverage, and causal limits.
 - Mark explicitly requested interpolated values as `unverified`; observed and hypothetical cells are never visually conflated.
 - Drag, resize, expand, refresh, and remove dashboard widgets.
+- Resize the desktop chat panel horizontally by dragging its edge; the preferred width persists on the device and remains keyboard accessible.
 - Refresh a widget only through its original source and update it only when verified data changed.
 - Show a truthful Run Trace for routing, search, file parsing, transformation, validation, and fallback decisions.
 
@@ -58,6 +59,8 @@ Polaris treats data acquisition, identity resolution, transformation, analysis, 
 
 ```text
 Compare Canada and Ontario monthly unemployment rates over the last 10 years.
+
+Show Canada's seasonally adjusted youth unemployment rate, ages 15–24, as a monthly table for the last 10 years.
 
 Show monthly permanent-resident admissions to Canada for the last 20 years.
 
@@ -143,7 +146,7 @@ The proposal is persisted inside the active dashboard, so switching dashboards o
 
 | Publisher | Current coverage | Transport |
 | --- | --- | --- |
-| Statistics Canada | CPI, employment, overall and broad-industry unemployment, labour-force participation, wages, monthly real GDP, quarterly population, new-housing prices, retail trade, merchandise trade | Web Data Service JSON vectors |
+| Statistics Canada | CPI, employment, overall, age-group and broad-industry unemployment, age-group labour-force participation and employment, wages, monthly real GDP, quarterly population, new-housing prices, retail trade, merchandise trade | Web Data Service JSON vectors |
 | Immigration, Refugees and Citizenship Canada | National monthly permanent-resident admissions from the published workbook Total series | Official XLSX |
 | Bank of Canada | Policy and Bank rates, CORRA, prime and mortgage rates, government bond yields, major CAD exchange rates | Valet JSON API |
 | World Bank Indicators | GDP, population, net migration, inflation, unemployment, emissions, trade, debt, life expectancy, internet use, fertility | Official JSON API + CSV download |

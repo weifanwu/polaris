@@ -48,8 +48,21 @@ assert.equal(unsupportedRegionalGdp, null, "an unsupported subnational geography
 const unsupportedRegionalMortgage = await resolveWithOfficialConnector("安大略省最近12个月五年期房贷利率");
 assert.equal(unsupportedRegionalMortgage, null, "a national Bank of Canada series must not be labelled as an Ontario series");
 
-const unsupportedYouthRate = await resolveWithOfficialConnector("加拿大青年最近24个月失业率");
-assert.equal(unsupportedYouthRate, null, "an age qualifier must not fall back to the all-ages unemployment rate");
+const youthRate = await resolveWithOfficialConnector("加拿大青年失业率数据表格 过去10年月度");
+assert.ok(youthRate, "Statistics Canada should answer an exact youth unemployment request without Web Search");
+assert.equal(youthRate.widget.rows.length, 120, "ten years of monthly youth unemployment should contain 120 rows");
+assert.equal(youthRate.widget.visualization, "table", "an explicit table request should preserve the requested presentation");
+assert.match(youthRate.widget.title, /青年|15至24岁/);
+assert.match(youthRate.widget.dataQuality?.scope ?? "", /年龄：15至24岁/);
+assert.match(youthRate.widget.dataQuality?.scope ?? "", /性别：合计/);
+assert.equal(youthRate.widget.dataQuality?.missingPoints, 0, "the official youth series should expose complete trailing coverage");
+
+const youthWomenRate = await resolveWithOfficialConnector("加拿大15至24岁女性最近24个月失业率");
+assert.equal(youthWomenRate, null, "a total-gender youth vector must not be relabelled as a women-only series");
+
+const coreAgeRate = await resolveWithOfficialConnector("加拿大25至54岁最近24个月失业率");
+assert.ok(coreAgeRate, "the age-dimension catalog should support another official labour-force age group");
+assert.match(coreAgeRate.widget.dataQuality?.scope ?? "", /25至54岁/);
 
 const unsupportedFoodCpi = await resolveWithOfficialConnector("加拿大最近24个月食品CPI");
 assert.equal(unsupportedFoodCpi, null, "a CPI category qualifier must not fall back to all-items CPI");

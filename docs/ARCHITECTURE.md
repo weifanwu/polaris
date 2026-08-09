@@ -89,7 +89,9 @@ The quality envelope records:
 
 ### Statistics Canada WDS
 
-The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. Broad-industry unemployment uses Table 14-10-0022-01 and is explicitly marked as unadjusted and NAICS-based. It requests only the needed vectors and periods, then aligns regions or industries and calculates changes locally.
+The connector uses Statistics Canada's stable vector identifiers and the `getDataFromVectorsAndLatestNPeriods` method. Its curated catalog covers national, provincial, territorial, and selected census-metropolitan series for CPI, labour-force conditions, average hourly wages, monthly real GDP, quarterly population, new-housing prices, retail sales, and merchandise trade. Table 14-10-0287-01 is represented as a dimension-aware age catalog: ages 15–24, 15–19, 20–24, 25+, 25–54, and 55+ can be combined with unemployment, employment rate, participation rate, or employment across Canada and supported provinces. Gender-specific wording is rejected unless an exact gender vector exists, so a total-gender series cannot be silently relabelled. Broad-industry unemployment uses Table 14-10-0022-01 and is explicitly marked as unadjusted and NAICS-based. The connector requests only the needed vectors and periods, then aligns regions or dimensions and calculates changes locally.
+
+The full 14-10-0287 CSV cube is more than a gigabyte uncompressed. Web Search and generic file input are therefore discovery fallbacks, not the execution path for common historical labour requests. The connector resolves the requested dimensions first and fetches only the required vectors and trailing periods. Research prompts separately prefer official WDS/full-table metadata and machine-readable downloads over recent releases or the table viewer's default short window.
 
 Statistics Canada does not publish a standalone monthly unemployment rate for the software/IT industry. Software publishing, computer systems design, and computer manufacturing belong to different NAICS classes. The capability catalog marks this as a curated source gap: Polaris blocks the overall Canada vector, fetches the official proxy, performs one low-context discovery search, and then returns two clearly labelled 120-month Statistics Canada proxies—NAICS 54 and combined NAICS 51/71—with the scope mismatch visible in the title, summary, and quality metadata. The discovery search preserves external-source awareness without allowing a probabilistic classification to trigger an expensive second research pass for a known gap.
 
@@ -134,6 +136,8 @@ Both connector and research results enter the same Apache ECharts renderer. The 
 - generated accessibility descriptions and decal support.
 
 The renderer never performs interpolation itself and does not force the y-axis to zero for time-series data. When a user explicitly requests hypotheses on supplied data, a deterministic pre-render transform may fill no more than two consecutive internal periods and no more than six or 5% of numeric cells. Cell-level provenance remains in `WidgetSpec`; charts mark those points `H`, tables prefix them with `≈`, and quality metadata records the method and count.
+
+The desktop chat panel has an independent 320–720 px horizontal resize control. Pointer capture keeps dragging stable while the grid relayouts; arrow keys, Home, End, and double-click provide accessible adjustment and reset. The chosen width is device-local UI state rather than dashboard context, and the resize affordance is removed in the stacked mobile layout.
 
 ## Fragmented research harness
 

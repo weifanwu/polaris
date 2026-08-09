@@ -65,6 +65,8 @@ const SYSTEM_PROMPT = `Goal: create one source-backed dashboard widget from a re
 
 Success criteria:
 - Search with concise English identifiers as needed and prefer official or primary data pages.
+- For long time series, prioritize a machine-readable API, official full-table download, CSV, or XLSX over news releases and chart captions. Use releases for interpretation, not as a substitute for the historical observations.
+- When researching Statistics Canada, identify the exact table dimensions and prefer WDS vectors or the official full-table download endpoint. Never conclude that history is unavailable merely because the default table view shows only recent months.
 - Use only retrieved numbers. Never recall, estimate, interpolate, or silently convert missing values to zero.
 - Return 2–120 useful rows when charting a series, no more than 6 columns, and exactly one string cell per column. When a verified source exposes the requested history, preserve the full requested range instead of truncating it to a sample.
 - For charts, the first column is the x-axis and remaining series are numeric. Use an empty string for a genuinely missing numeric value.
@@ -678,8 +680,8 @@ Partial verified rows: ${allowPartialData ? "allowed and preferred over failure"
       max_tool_calls: maxToolCalls,
       max_output_tokens: 6_000,
       prompt_cache_key: complex
-        ? "polaris-research-complex-v4"
-        : "polaris-research-simple-v4",
+        ? "polaris-research-complex-v5"
+        : "polaris-research-simple-v5",
       include: ["web_search_call.action.sources"],
       input: [
         { role: "developer", content: SYSTEM_PROMPT },
@@ -905,13 +907,15 @@ async function researchOneSeries(
       tool_choice: "required",
       max_tool_calls: 2,
       max_output_tokens: 4_000,
-      prompt_cache_key: "polaris-series-research-v1",
+      prompt_cache_key: "polaris-series-research-v2",
       include: ["web_search_call.action.sources"],
       input: [
         {
           role: "developer",
           content: `Research exactly one time series for a larger comparison.
 - Search the preferred official or primary source first, then a trustworthy attributed secondary source when official pages are inaccessible.
+- Prefer machine-readable APIs and downloadable CSV/XLSX tables for histories. A recent release or default five-month table view does not establish that earlier observations are unavailable.
+- For Statistics Canada, resolve the exact dimensions in the table and use WDS vectors or the full-table download metadata rather than copying only the latest release.
 - Return every verified observation you can obtain, up to 120 rows. Partial coverage with at least two rows is success${allowPartialData ? " and is preferred over failure" : " only when it covers the requested range"}.
 - Never interpolate, estimate from memory, or turn missing values into zero. Output only available rows; the assembler will preserve gaps.
 - Use period labels in sortable ISO form, preferably YYYY-MM for monthly data.

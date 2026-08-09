@@ -339,6 +339,10 @@ type Metric = {
   decimals: number;
   transform?: (value: number) => number;
   forceLevel?: boolean;
+  demographicScope?: {
+    en: string;
+    zh: string;
+  };
 };
 
 const METRICS: Metric[] = [
@@ -353,6 +357,64 @@ const METRICS: Metric[] = [
   { id: "population", title: "Population estimate", zh: "人口估计", aliases: [/population/i, /人口/], vectors: POPULATION_VECTORS, tableId: "17100009", tableTitle: "Population estimates, quarterly", frequency: "quarterly", unit: "persons", decimals: 0 },
   { id: "retail", title: "Retail sales", zh: "零售销售额", aliases: [/retail sales?/i, /retail trade/i, /零售销售|零售额/], vectors: RETAIL_VECTORS, tableId: "20100056", tableTitle: "Monthly retail trade sales", frequency: "monthly", unit: "CAD millions", decimals: 1, transform: (value) => value / 1_000 },
 ];
+
+type AgeGroupDefinition = {
+  id: string;
+  label: string;
+  zh: string;
+  aliases: RegExp[];
+  vectorOffset: number;
+};
+
+// Table 14-10-0287-01 publishes the same labour-force measures for each age
+// group in stable WDS vectors. Keeping the dimension identity here prevents a
+// qualified request from ever falling through to an all-ages aggregate.
+const AGE_GROUPS: AgeGroupDefinition[] = [
+  { id: "15_24", label: "ages 15 to 24", zh: "15至24岁青年", aliases: [/\byouth\b/i, /young people/i, /ages?\s*15\s*(?:to|-|–)\s*24/i, /15\s*(?:to|-|–|至)\s*24\s*(?:years? old|岁)?/i, /青年|年轻人/], vectorOffset: 27 },
+  { id: "15_19", label: "ages 15 to 19", zh: "15至19岁", aliases: [/ages?\s*15\s*(?:to|-|–)\s*19/i, /15\s*(?:to|-|–|至)\s*19\s*(?:years? old|岁)?/i], vectorOffset: 54 },
+  { id: "20_24", label: "ages 20 to 24", zh: "20至24岁", aliases: [/ages?\s*20\s*(?:to|-|–)\s*24/i, /20\s*(?:to|-|–|至)\s*24\s*(?:years? old|岁)?/i], vectorOffset: 81 },
+  { id: "25_plus", label: "ages 25 and over", zh: "25岁及以上", aliases: [/ages?\s*25\s*(?:and over|\+)/i, /25\s*岁(?:及|以)上/i], vectorOffset: 108 },
+  { id: "25_54", label: "ages 25 to 54", zh: "25至54岁", aliases: [/ages?\s*25\s*(?:to|-|–)\s*54/i, /25\s*(?:to|-|–|至)\s*54\s*(?:years? old|岁)?/i], vectorOffset: 135 },
+  { id: "55_plus", label: "ages 55 and over", zh: "55岁及以上", aliases: [/ages?\s*55\s*(?:and over|\+)/i, /55\s*岁(?:及|以)上/i, /older workers?/i], vectorOffset: 162 },
+];
+
+const AGE_SUPPORTED_METRICS = new Set(["unemployment", "employment_rate", "participation", "employment"]);
+
+function offsetVectorMap(vectors: VectorMap, offset: number): VectorMap {
+  return Object.fromEntries(Object.entries(vectors).map(([geography, vector]) => [
+    geography,
+    `v${Number(vector.replace(/^v/i, "")) + offset}`,
+  ]));
+}
+
+function selectedAgeGroup(query: string) {
+  return AGE_GROUPS.find((group) => group.aliases.some((alias) => alias.test(query))) ?? null;
+}
+
+function requestsSpecificGender(query: string) {
+  return /(?:\bmale\b|\bfemale\b|\bmen\b|\bwomen\b|男性|女性|男青年|女青年)/i.test(query);
+}
+
+function ageAdjustedMetric(query: string): Metric | null {
+  const ageGroup = selectedAgeGroup(query);
+  if (!ageGroup || requestsSpecificGender(query)) return null;
+  const baseMetric = METRICS.find((candidate) =>
+    AGE_SUPPORTED_METRICS.has(candidate.id)
+    && candidate.aliases.some((alias) => alias.test(query))
+  );
+  if (!baseMetric) return null;
+  return {
+    ...baseMetric,
+    id: `${baseMetric.id}__age_${ageGroup.id}`,
+    title: `${baseMetric.title} · ${ageGroup.label}`,
+    zh: `${ageGroup.zh}${baseMetric.zh}`,
+    vectors: offsetVectorMap(baseMetric.vectors, ageGroup.vectorOffset),
+    demographicScope: {
+      en: `Age: ${ageGroup.label.replace(/^ages /, "")} · Gender: total · Seasonally adjusted`,
+      zh: `年龄：${ageGroup.zh.replace(/青年$/, "")} · 性别：合计 · 季节调整`,
+    },
+  };
+}
 
 type WdsPoint = { refPer?: string; value?: number | string | null };
 type WdsItem = {
@@ -562,6 +624,9 @@ export const statisticsCanadaConnector: DataConnector = {
   supportsQuery(query) {
     const qualifiers = detectMaterialQualifiers(query);
     if (!qualifiers.length) return true;
+    if (qualifiers.every((qualifier) => qualifier === "demographic")) {
+      return Boolean(ageAdjustedMetric(query));
+    }
     return qualifiers.every((qualifier) => qualifier === "industry")
       && selectIndustries(query).length > 0
       && /(unemployment rate|unemployment|失业率|失业数据)/i.test(query);
@@ -575,7 +640,9 @@ export const statisticsCanadaConnector: DataConnector = {
       return resolveIndustryUnemployment(query, industries);
     }
 
-    const metric = METRICS.find((candidate) => candidate.aliases.some((alias) => alias.test(query))) ?? tradeMetric(query);
+    const metric = ageAdjustedMetric(query)
+      ?? METRICS.find((candidate) => candidate.aliases.some((alias) => alias.test(query)))
+      ?? tradeMetric(query);
     if (!metric) return null;
     if (industries.length || hasIndustryQualifier(query) || hasOccupationQualifier(query)) return null;
 
@@ -589,7 +656,8 @@ export const statisticsCanadaConnector: DataConnector = {
       ? requestedQuarterlyPeriods(query)
       : requestedMonthlyPeriods(query);
     let calculation: Calculation = metric.forceLevel ? "level" : requestedCalculation(query);
-    if (metric.id === "cpi" && calculation === "level" && /(inflation|通胀|涨幅)/i.test(query)) calculation = "yoy";
+    const rootMetricId = metric.id.split("__")[0];
+    if (rootMetricId === "cpi" && calculation === "level" && /(inflation|通胀|涨幅)/i.test(query)) calculation = "yoy";
     const offset = calculation === "yoy" ? (metric.frequency === "monthly" ? 12 : 4) : calculation === "mom" ? 1 : 0;
     const payload = await fetchVectors(vectors, Math.min(requested + offset, 132));
     const rows = calculateRows(payload, vectors, metric.frequency, requested, calculation, metric.transform ?? ((value) => value));
@@ -607,10 +675,10 @@ export const statisticsCanadaConnector: DataConnector = {
     const missingPoints = numericCells.length - availablePoints;
     const sourceUrl = `https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=${metric.tableId}01`;
     const titleMetric = chinese ? metric.zh : metric.title;
-    const aggregateIndustry = ["unemployment", "employment_rate", "participation", "employment", "wages", "gdp"].includes(metric.id);
+    const aggregateIndustry = ["unemployment", "employment_rate", "participation", "employment", "wages", "gdp"].includes(rootMetricId);
     const scope = (chinese
-      ? `地区：${trade ? "加拿大" : labels.join("、")}${aggregateIndustry ? " · 行业：全部行业" : ""}`
-      : `Geography: ${trade ? "Canada" : labels.join(", ")}${aggregateIndustry ? " · Industry: total, all industries" : ""}`).slice(0, 240);
+      ? `地区：${trade ? "加拿大" : labels.join("、")}${metric.demographicScope ? ` · ${metric.demographicScope.zh}` : aggregateIndustry ? " · 行业：全部行业" : ""}`
+      : `Geography: ${trade ? "Canada" : labels.join(", ")}${metric.demographicScope ? ` · ${metric.demographicScope.en}` : aggregateIndustry ? " · Industry: total, all industries" : ""}`).slice(0, 240);
 
     return {
       message: chinese
@@ -619,7 +687,7 @@ export const statisticsCanadaConnector: DataConnector = {
       widget: {
         title: `${titleMetric}${calculationLabel ? ` · ${calculationLabel}` : ""}`,
         subtitle: `${rows[0].date} – ${rows.at(-1)!.date} · ${metric.tableTitle} (${metric.tableId.slice(0, 2)}-${metric.tableId.slice(2, 4)}-${metric.tableId.slice(4)}-01)`,
-        visualization: "line_chart",
+        visualization: /(?:\btable\b|表格)/i.test(query) ? "table" : "line_chart",
         columns: [
           { key: "date", label: chinese ? (metric.frequency === "monthly" ? "月份" : "季度") : (metric.frequency === "monthly" ? "Month" : "Quarter"), dataType: "date", unit: null },
           ...labels.map((label, index) => ({

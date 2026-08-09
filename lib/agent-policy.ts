@@ -92,7 +92,8 @@ export function buildResearchFallbackInstruction(query: string) {
 
   return `The deterministic connector registry did not return an exact match. Web research is mandatory for this request.
 - Search for the exact requested metric and every requested dimension first; do not stop merely because one official API lacks the series.
-- Search credible primary data, downloadable tables, government releases, industry reports, and well-attributed secondary sources.
+- Search credible primary data, machine-readable APIs, downloadable CSV/XLSX tables, government releases, industry reports, and well-attributed secondary sources. For long histories, prefer the structured dataset over a recent news release or the default limited table view.
+- For Statistics Canada, use the table dimensions plus WDS/full-table download metadata; seeing only the latest months in the browser view is not evidence that the historical series is unavailable.
 - If the exact series cannot be verified, search for a useful adjacent or proxy measure before returning cannot_answer.
 - A proxy result must be named as a proxy in the title, subtitle, column labels, and summary, and must explain how its scope differs from the request.
 - Never substitute a national total or another aggregate for a requested subgroup${hasMaterialSlice ? "; this request contains a material subgroup/category qualifier" : ""}.
