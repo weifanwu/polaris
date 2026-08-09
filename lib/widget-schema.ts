@@ -24,7 +24,7 @@ export const sourceSchema = z.object({
 });
 
 export const dataQualitySchema = z.object({
-  method: z.enum(["official_connector", "web_search"]),
+  method: z.enum(["official_connector", "web_search", "user_data"]),
   sourceName: z.string().min(1).max(120),
   requestedPoints: z.number().int().nonnegative(),
   availablePoints: z.number().int().nonnegative(),

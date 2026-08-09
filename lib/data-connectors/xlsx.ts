@@ -27,6 +27,15 @@ function parseSharedStrings(xml: string) {
   );
 }
 
+export function listWorksheetNames(workbook: ArrayBuffer) {
+  const files = unzipSync(new Uint8Array(workbook));
+  const workbookXml = files["xl/workbook.xml"];
+  if (!workbookXml) throw new Error("Invalid XLSX workbook structure");
+  return Array.from(strFromU8(workbookXml).matchAll(/<sheet\b([^>]*)\/?\s*>/g), (match) =>
+    decodeXml(readAttribute(match[1], "name")),
+  ).filter(Boolean);
+}
+
 function normalizeWorksheetPath(target: string) {
   const normalized = target.replace(/^\//, "").replace(/^\.\.\//, "");
   return normalized.startsWith("xl/") ? normalized : `xl/${normalized}`;

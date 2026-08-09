@@ -8,6 +8,7 @@ import { DashboardGrid } from "./dashboard-grid";
 import { Sidebar } from "./sidebar";
 import { demoWidgets } from "@/lib/demo-data";
 import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
+import type { UserDataset } from "@/lib/user-dataset";
 import type { GenerateWidgetResult } from "@/lib/widget-schema";
 import type { ApiHealth, ChatMessage, DashboardWidget } from "@/types";
 
@@ -55,6 +56,7 @@ async function requestWidget(
   conversationContext = "",
   history: ChatMessage[] = [],
   skipClarification = false,
+  userDataset: UserDataset | null = null,
 ) {
   const response = await fetch("/api/generate-widget", {
     method: "POST",
@@ -69,6 +71,7 @@ async function requestWidget(
             content: content.slice(0, 400),
           })),
       skipClarification,
+      userData: userDataset,
     }),
   });
   const payload = (await response.json()) as GenerateWidgetResult & { error?: string };
@@ -85,6 +88,7 @@ export function AppShell() {
     emptyDashboard.conversationContext,
   );
   const [query, setQuery] = useState("");
+  const [userDataset, setUserDataset] = useState<UserDataset | null>(null);
   const [loadingStage, setLoadingStage] = useState<"searching" | "structuring" | null>(null);
   const [refreshingIds, setRefreshingIds] = useState<Set<string>>(new Set());
   const [refreshErrors, setRefreshErrors] = useState<Record<string, string>>({});
@@ -126,24 +130,26 @@ export function AppShell() {
   }, []);
 
   const submit = useCallback(async () => {
-    const cleanQuery = query.trim();
+    const cleanQuery = query.trim() || (userDataset ? "Analyze this dataset and create the most useful visualization." : "");
     if (!cleanQuery || loadingStage) return;
 
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content: cleanQuery,
+      content: userDataset ? `${cleanQuery}\n\nAttached data: ${userDataset.name}` : cleanQuery,
     };
     setMessages((current) => [...current, userMessage].slice(-20));
     setQuery("");
-    setLoadingStage("searching");
+    setLoadingStage(userDataset ? "structuring" : "searching");
     const stageTimer = window.setTimeout(() => setLoadingStage("structuring"), 2_200);
 
     try {
       const result = await requestWidget(
         cleanQuery,
-        conversationContext,
+        userDataset ? "" : conversationContext,
         messages,
+        false,
+        userDataset,
       );
       if (typeof result.conversationContext === "string") {
         setConversationContext(result.conversationContext);
@@ -177,6 +183,7 @@ export function AppShell() {
         ...current,
         assistantMessage,
       ].slice(-20));
+      if (userDataset) setUserDataset(null);
     } catch (error) {
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -192,7 +199,7 @@ export function AppShell() {
       window.clearTimeout(stageTimer);
       setLoadingStage(null);
     }
-  }, [conversationContext, loadingStage, messages, query]);
+  }, [conversationContext, loadingStage, messages, query, userDataset]);
 
   const refreshWidget = useCallback(async (id: string) => {
     const existing = widgets.find((widget) => widget.id === id);
@@ -304,9 +311,11 @@ export function AppShell() {
         query={query}
         messages={messages}
         loadingStage={loadingStage}
+        userDataset={userDataset}
         onToggle={() => setChatCollapsed((value) => !value)}
         onClear={clearConversation}
         onQueryChange={setQuery}
+        onDatasetChange={setUserDataset}
         onSubmit={submit}
         onFocusWidget={focusWidget}
       />

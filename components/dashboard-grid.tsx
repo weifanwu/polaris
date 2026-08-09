@@ -48,9 +48,9 @@ export function DashboardGrid({
     return (
       <div className="empty-canvas">
         <div className="empty-orbit"><Compass size={28} /></div>
-        <span><Sparkles size={13} /> Ready for a question</span>
-        <h2>Turn the live web into your dashboard.</h2>
-        <p>Ask for a price, time series, comparison, or metric in the chat panel. Polaris will search, structure, and pin the result here.</p>
+        <span><Sparkles size={13} /> Ready to analyze</span>
+        <h2>Turn live research or your own data into insight.</h2>
+        <p>Ask a question, paste a table, or upload a data file. Polaris will research, calculate, visualize, and explain the result here.</p>
       </div>
     );
   }

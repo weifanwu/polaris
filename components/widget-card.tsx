@@ -1,6 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import {
+  BrainCircuit,
   ExternalLink,
   GripHorizontal,
   Maximize2,
@@ -49,7 +51,9 @@ export function WidgetCard({
   onRefresh,
   onToggleFocus,
 }: Props) {
+  const [showAnalysis, setShowAnalysis] = useState(false);
   const quality = widget.dataQuality;
+  const isUserData = quality?.method === "user_data";
   const coverage = quality && quality.requestedPoints > 0
     ? Math.round((quality.availablePoints / quality.requestedPoints) * 100)
     : null;
@@ -68,11 +72,11 @@ export function WidgetCard({
               {widget.isDemo ? <span className="demo-pill">Demo data</span> : null}
               {quality ? (
                 <span
-                  className={`quality-pill ${quality.method === "official_connector" ? "official" : "searched"}`}
+                  className={`quality-pill ${quality.method === "official_connector" ? "official" : quality.method === "user_data" ? "uploaded" : "searched"}`}
                   title={`${quality.sourceName} · ${quality.availablePoints}/${quality.requestedPoints} verified observations`}
                 >
-                  {quality.method === "official_connector" ? <ShieldCheck size={10} /> : <SearchCheck size={10} />}
-                  {quality.method === "official_connector" ? "Official" : "Web verified"}
+                  {quality.method === "official_connector" ? <ShieldCheck size={10} /> : quality.method === "user_data" ? <FileSpreadsheetIcon /> : <SearchCheck size={10} />}
+                  {quality.method === "official_connector" ? "Official" : quality.method === "user_data" ? "Your data" : "Web verified"}
                 </span>
               ) : null}
             </div>
@@ -81,6 +85,14 @@ export function WidgetCard({
           </div>
         </div>
         <div className="widget-actions">
+          <button
+            className={`icon-button ${showAnalysis ? "active" : ""}`}
+            onClick={() => setShowAnalysis((value) => !value)}
+            aria-label={`${showAnalysis ? "Hide" : "Show"} analysis for ${widget.title}`}
+            title="Analysis and methodology"
+          >
+            <BrainCircuit size={15} />
+          </button>
           <button
             className="icon-button"
             onClick={onToggleFocus}
@@ -92,9 +104,9 @@ export function WidgetCard({
           <button
             className="icon-button"
             onClick={onRefresh}
-            disabled={refreshing}
+            disabled={refreshing || isUserData}
             aria-label={`Refresh ${widget.title}`}
-            title="Refresh with original question"
+            title={isUserData ? "Re-upload the source data to refresh" : "Refresh with original question"}
           >
             <RefreshCw size={15} className={refreshing ? "spin" : undefined} />
           </button>
@@ -110,11 +122,19 @@ export function WidgetCard({
       </header>
 
       <div className="widget-content"><WidgetContent widget={widget} /></div>
+      {showAnalysis ? (
+        <section className="widget-analysis" aria-label="Polaris analysis">
+          <div><BrainCircuit size={14} /><strong>POLARIS ANALYSIS</strong></div>
+          <p>{widget.summary || "No additional analysis was generated."}</p>
+        </section>
+      ) : null}
 
       <footer className="widget-footer">
         <div className="source-list">
           {widget.isDemo ? (
             <span className="local-source">Local preview · not Web Search</span>
+          ) : isUserData ? (
+            <span className="local-source">User supplied · {quality?.sourceName}</span>
           ) : widget.sources.length ? (
             widget.sources.slice(0, 5).map((source, index) => (
               <a key={source.url} href={source.url} target="_blank" rel="noreferrer" title={source.title}>
@@ -150,4 +170,8 @@ export function WidgetCard({
       {refreshError ? <div className="widget-error">{refreshError}</div> : null}
     </article>
   );
+}
+
+function FileSpreadsheetIcon() {
+  return <span aria-hidden="true" className="uploaded-dot" />;
 }

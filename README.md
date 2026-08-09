@@ -23,7 +23,7 @@
   <img src="./public/og.png" alt="Polaris live data dashboard" width="100%" />
 </p>
 
-Polaris turns a data question into a reusable dashboard widget. It resolves follow-up answers, routes supported requests to official structured datasets, falls back to bounded web research, validates the resulting observations, and compiles them into an interactive chart, table, or metric card. Every generated widget keeps its source links, coverage metadata, and independent refresh state.
+Polaris turns a data question—or a dataset you supply—into a reusable analytical dashboard widget. It resolves follow-up answers, routes supported requests to official structured datasets, decomposes fragmented research into independently sourced series, validates the resulting observations, and compiles them into an interactive chart, table, or metric card with an explainable analysis.
 
 The repository is publicly available for personal, educational, research, and other noncommercial use under the [PolyForm Noncommercial License 1.0.0](./LICENSE).
 
@@ -67,9 +67,19 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Uses the OpenAI Responses API with hosted Web Search.
 - Prefers official, primary, and directly attributable sources.
 - Searches with canonical English names, tickers, and identifiers where useful.
-- Splits fragmented research by source, entity, or date range.
+- Plans fragmented comparisons before searching, researches each entity as an independent series, and aligns the results deterministically.
+- Treats verified partial coverage as a useful result and preserves unavailable periods as visible chart gaps.
 - Supports derived calculations such as month-over-month change when the underlying values are verifiable.
 - Stops within an explicit search budget instead of retrying indefinitely.
+
+### Analyze your own data
+
+- Paste spreadsheet cells, CSV, TSV, JSON, or plain-text tables directly into the chat composer.
+- Upload `.csv`, `.tsv`, `.json`, `.xlsx`, or `.txt` files without configuring a connector.
+- Detects columns, dates, numeric measures, missing values, units, and useful comparisons before choosing a visualization.
+- Performs reproducible calculations such as growth, ranking, shares, averages, and outlier detection using only supplied values.
+- Keeps uploaded content in transient request state rather than browser dashboard storage; generated widgets retain the result, not the raw file.
+- Labels widgets as `Your data` and disables source refresh until the dataset is supplied again.
 
 ### Deterministic data pipeline
 
@@ -99,6 +109,7 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Renders unavailable numeric values as chart gaps rather than silently converting them to zero.
 - Uses Apache ECharts for zooming, crosshair tooltips, series isolation, min/max markers, average reference lines, responsive resizing, and accessible chart descriptions.
 - Shows whether a widget came from an official connector or Web Search, plus its verified coverage percentage.
+- Adds an expandable analysis panel with findings, transformations, comparability warnings, and limitations.
 
 ### Flexible dashboard
 
@@ -125,7 +136,9 @@ This makes prompt growth, cache behavior, and expensive research paths visible d
 
 ```mermaid
 flowchart LR
-    U["Question + compact state"] --> C{"Official connector match?"}
+    U["Question or user dataset"] --> Y{"User data attached?"}
+    Y -->|"yes"| YA["Analyze supplied rows"]
+    Y -->|"no"| C{"Official connector match?"}
     C -->|"direct match"| F["Fetch API / XLSX"]
     C -->|"needs context"| I["Luna intent resolver"]
     I -->|"missing required choice"| Q["Focused follow-up"]
@@ -133,10 +146,12 @@ flowchart LR
     C2 -->|"yes"| F
     C2 -->|"no"| R{"Research router"}
     R -->|"simple lookup"| T["Terra"]
-    R -->|"complex research"| S["Sol"]
+    R -->|"complex research"| H["Plan independent series"]
+    H --> S["Parallel bounded searches"]
     T --> W["Hosted Web Search"]
     S --> W
-    F --> P["Deterministic parse / align / calculate"]
+    YA --> P["Deterministic parse / align / calculate"]
+    F --> P
     W --> O["Structured Outputs"]
     O --> P
     P --> Z["Quality checks + Zod validation"]
@@ -156,9 +171,10 @@ The request lifecycle is deliberately bounded:
 1. The client sends the current question and a compact conversation state.
 2. Polaris first attempts a deterministic route to a supported official dataset. A complete direct request does not require a model call.
 3. When conversation context is required, a lightweight intent model resolves the follow-up into one standalone query and retries connector routing.
-4. Unmatched requests use the fast or advanced research model with a fixed Web Search budget.
-5. Deterministic code parses, aligns, calculates, and validates observations; missing values remain missing.
-6. The chart compiler adds interaction and quality metadata, then the browser stores the widget locally.
+4. Complex unmatched requests are split into independent source/entity series. Each series has its own bounded research pass, so one missing source does not invalidate the others.
+5. Supplied datasets bypass Web Search and are analyzed only from the uploaded or pasted values.
+6. Deterministic code parses, aligns, calculates, and validates observations; missing values remain missing.
+7. The chart compiler adds interaction, analysis, and quality metadata, then the browser stores the widget locally.
 
 The detailed design and connector contract are documented in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
@@ -325,7 +341,21 @@ Request:
   "query": "Compare Canada and US CPI inflation for the last 12 complete months",
   "conversationContext": "Monthly CPI year-over-year comparison; Canada and United States; official sources; line chart",
   "history": [],
-  "skipClarification": false
+  "skipClarification": false,
+  "userData": null
+}
+```
+
+To analyze user-supplied data without Web Search, send a bounded dataset:
+
+```json
+{
+  "query": "Compare revenue growth by region and highlight outliers",
+  "userData": {
+    "name": "revenue.csv",
+    "format": "csv",
+    "content": "month,region,revenue\n2026-01,East,125000\n2026-01,West,118000"
+  }
 }
 ```
 

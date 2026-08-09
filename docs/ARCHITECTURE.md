@@ -6,17 +6,24 @@ Polaris treats a chart as the final compiled view of a verified dataset. The lan
 
 ```mermaid
 flowchart TD
-    A["Natural-language request"] --> B{"Enough direct information?"}
+    A["Question plus optional user dataset"] --> U{"User data attached?"}
+    U -->|"yes"| UA["Transient user-data analysis"]
+    U -->|"no"| B{"Enough direct information?"}
     B -->|"no"| C["Compact intent resolution"]
     B -->|"yes"| X["Dimension and capability inspection"]
     C --> X
     X --> D["Connector registry"]
     D -->|"exact match"| E["Official API or downloadable dataset"]
-    D -->|"unsupported or unmatched"| F["Mandatory bounded Web Search research"]
+    D -->|"unsupported or unmatched"| R{"Simple or fragmented?"}
+    R -->|"simple"| F["Bounded Web Search research"]
+    R -->|"fragmented"| RP["Plan one research task per series"]
+    RP --> RS["Parallel bounded series searches"]
+    RS --> G
     F -->|"exact series unavailable"| P["Search and label credible proxy measures"]
     P -->|"web or official proxy found"| G
     P -->|"no defensible proxy"| Q["Cannot answer with search usage reported"]
-    E --> G["Parse and normalize"]
+    UA --> G["Parse and normalize"]
+    E --> G
     F -->|"exact series found"| G
     G --> H["Align dates and calculate"]
     H --> I["Validate schema, units, gaps, and coverage"]
@@ -36,7 +43,8 @@ Polaris therefore prefers this order:
 4. Parse and transform it in application code.
 5. Preserve unavailable observations as `null`/empty cells.
 6. Validate the complete widget contract and record coverage metadata.
-7. Use model-assisted Web Search only when no supported connector can answer.
+7. Decompose fragmented multi-source questions into independent series before Web Search.
+8. Allow a user-supplied dataset to bypass discovery when the web cannot provide the rows.
 
 This lowers cost because a direct connector request sends no dataset through a model. It improves completeness because row count is limited by the product schema rather than search-result context. It improves accuracy because formulas and date joins are testable code.
 
@@ -58,7 +66,7 @@ The invariant is: a connector may match only when every material qualifier is su
 
 The quality envelope records:
 
-- acquisition method (`official_connector` or `web_search`);
+- acquisition method (`official_connector`, `web_search`, or `user_data`);
 - source name;
 - requested, available, and missing observation counts;
 - actual coverage start and end;
@@ -104,6 +112,14 @@ Both connector and research results enter the same Apache ECharts renderer. The 
 - generated accessibility descriptions and decal support.
 
 The renderer never interpolates a missing observation and does not force the y-axis to zero for time-series data.
+
+## Fragmented research harness
+
+For a comparison whose rows live across different publishers, Polaris first creates a compact plan with one exact series per entity or geography. Each series is researched independently with its own source preference and small search budget. Application code then normalizes period labels, validates numeric cells, joins the union of verified dates, applies requested MoM/YoY calculations, and leaves absent cells empty. A partially populated comparison can therefore render honestly instead of failing because one publisher has gaps.
+
+## User-supplied data
+
+CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and may only calculate from supplied cells. Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
 
 ## Source policy
 

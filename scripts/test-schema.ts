@@ -18,6 +18,8 @@ import {
   requestedQuarterlyPeriods,
 } from "../lib/data-connectors/query-utils";
 import { readWorksheet } from "../lib/data-connectors/xlsx";
+import { listWorksheetNames } from "../lib/data-connectors/xlsx";
+import { MAX_USER_DATA_CHARS, parseUserDataset } from "../lib/user-dataset";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { strToU8, zipSync } from "fflate";
 
@@ -105,6 +107,26 @@ assert.equal(
   }).success,
   true,
   "cost telemetry and compact context should pass",
+);
+
+assert.equal(
+  widgetSpecSchema.safeParse({
+    ...valid,
+    sources: [],
+    dataQuality: { ...valid.dataQuality, method: "user_data", sourceName: "analysis.csv" },
+  }).success,
+  true,
+  "user-supplied datasets should be represented explicitly in quality metadata",
+);
+assert.deepEqual(
+  parseUserDataset({ name: "sample.csv", format: "csv", content: "date,value\n2026-01,10" }),
+  { name: "sample.csv", format: "csv", content: "date,value\n2026-01,10", truncated: false },
+  "valid user datasets should be bounded and parsed",
+);
+assert.equal(
+  parseUserDataset({ name: "large.csv", format: "csv", content: "x".repeat(MAX_USER_DATA_CHARS + 1) }),
+  null,
+  "oversized user datasets must be rejected before model input",
 );
 
 const boundedHistory = parseConversationHistory(
@@ -205,7 +227,8 @@ const workbook = zipSync({
   "xl/worksheets/sheet2.xml": strToU8('<?xml version="1.0"?><worksheet><sheetData><row r="5"><c r="BR5" t="s"><v>0</v></c></row><row r="7"><c r="A7" t="s"><v>1</v></c><c r="BR7"><v>2400.5</v></c></row></sheetData></worksheet>'),
 });
 const parsedWorksheet = readWorksheet(workbook.buffer as ArrayBuffer, "Monthly Prices");
+assert.deepEqual(listWorksheetNames(workbook.buffer as ArrayBuffer), ["Monthly Prices"], "XLSX sheet names should be discoverable for uploads");
 assert.equal(parsedWorksheet[0].cells.BR, "Gold", "XLSX shared strings should be decoded");
 assert.equal(parsedWorksheet[1].cells.BR, "2400.5", "XLSX numeric cells should be decoded");
 
-console.log("Polaris schema, connector, and agent-policy tests passed (33 cases).");
+console.log("Polaris schema, connector, user-data, and agent-policy tests passed (37 cases).");
