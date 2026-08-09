@@ -9,7 +9,7 @@ export function parseConversationHistory(value: unknown): ConversationTurn[] {
   if (!Array.isArray(value)) return [];
 
   return value
-    .slice(-4)
+    .slice(-6)
     .flatMap((turn): ConversationTurn[] => {
       if (!turn || typeof turn !== "object") return [];
       const candidate = turn as { role?: unknown; content?: unknown };
@@ -19,7 +19,7 @@ export function parseConversationHistory(value: unknown): ConversationTurn[] {
       ) {
         return [];
       }
-      const content = candidate.content.trim().slice(0, 400);
+      const content = candidate.content.trim().slice(0, 360);
       return content ? [{ role: candidate.role, content }] : [];
     });
 }

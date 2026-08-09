@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   BrainCircuit,
   ExternalLink,
+  FlaskConical,
   GripHorizontal,
   Maximize2,
   Minimize2,
@@ -57,6 +58,8 @@ export function WidgetCard({
   const coverage = quality && quality.requestedPoints > 0
     ? Math.round((quality.availablePoints / quality.requestedPoints) * 100)
     : null;
+  const unverifiedPoints = quality?.unverifiedPoints ?? 0;
+  const verifiedPoints = quality ? Math.max(0, quality.availablePoints - unverifiedPoints) : 0;
 
   return (
     <article
@@ -73,7 +76,7 @@ export function WidgetCard({
               {quality ? (
                 <span
                   className={`quality-pill ${quality.method === "official_connector" ? "official" : quality.method === "user_data" ? "uploaded" : "searched"}`}
-                  title={`${quality.sourceName} · ${quality.availablePoints}/${quality.requestedPoints} verified observations`}
+                  title={`${quality.sourceName} · ${verifiedPoints}/${quality.requestedPoints} observed or verified${unverifiedPoints ? ` · ${unverifiedPoints} unverified hypotheses` : ""}`}
                 >
                   {quality.method === "official_connector" ? <ShieldCheck size={10} /> : quality.method === "user_data" ? <FileSpreadsheetIcon /> : <SearchCheck size={10} />}
                   {quality.method === "official_connector" ? "Official" : quality.method === "user_data" ? "Your data" : "Web verified"}
@@ -152,10 +155,18 @@ export function WidgetCard({
         ) : null}
         {quality && coverage !== null ? (
           <span
-            className={`coverage-stat ${coverage === 100 ? "complete" : "partial"}`}
-            title={`${quality.availablePoints} available · ${quality.missingPoints} missing · ${quality.coverageStart ?? "—"} to ${quality.coverageEnd ?? "—"}`}
+            className={`coverage-stat ${coverage === 100 && unverifiedPoints === 0 ? "complete" : "partial"}`}
+            title={`${verifiedPoints} observed or verified · ${unverifiedPoints} unverified · ${quality.missingPoints} missing · ${quality.coverageStart ?? "—"} to ${quality.coverageEnd ?? "—"}`}
           >
-            {coverage}% coverage
+            {coverage}% {unverifiedPoints ? "populated" : "coverage"}
+          </span>
+        ) : null}
+        {unverifiedPoints > 0 ? (
+          <span
+            className="hypothesis-stat"
+            title={quality?.hypothesisMethod ?? "Unverified hypothesis values"}
+          >
+            <FlaskConical size={10} /> H = {unverifiedPoints} unverified
           </span>
         ) : null}
         <time dateTime={widget.generatedAt}>

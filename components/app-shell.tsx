@@ -7,7 +7,7 @@ import { ChatPanel } from "./chat-panel";
 import { DashboardGrid } from "./dashboard-grid";
 import { Sidebar } from "./sidebar";
 import { demoWidgets } from "@/lib/demo-data";
-import { buildDashboardContext } from "@/lib/dashboard-context";
+import { buildDashboardContext, buildReferencedWidgetDataset } from "@/lib/dashboard-context";
 import { emptyDashboard, loadDashboard, saveDashboard } from "@/lib/storage";
 import type { UserDataset } from "@/lib/user-dataset";
 import { buildRefreshContext, validateRefreshCandidate, type RefreshContext } from "@/lib/widget-refresh";
@@ -68,12 +68,10 @@ async function requestWidget(
     body: JSON.stringify({
       query,
       conversationContext,
-      history: conversationContext
-        ? []
-        : history.slice(-4).map(({ role, content }) => ({
-            role,
-            content: content.slice(0, 400),
-          })),
+      history: history.slice(-6).map(({ role, content }) => ({
+        role,
+        content: content.slice(0, 360),
+      })),
       skipClarification,
       userData: userDataset,
       dashboardContext,
@@ -227,9 +225,12 @@ export function AppShell() {
       : typedQuery || (userDataset ? "Analyze this dataset and create the most useful visualization." : "");
     if (!cleanQuery || loadingStage) return;
 
-    const requestContext = retrying ? lastFailedRequest!.conversationContext : userDataset ? "" : conversationContext;
+    const contextualDataset = !retrying && !userDataset
+      ? buildReferencedWidgetDataset(widgets, cleanQuery)
+      : null;
+    const requestContext = retrying ? lastFailedRequest!.conversationContext : conversationContext;
     const requestHistory = retrying ? lastFailedRequest!.history : messages;
-    const requestDataset = retrying ? lastFailedRequest!.userDataset : userDataset;
+    const requestDataset = retrying ? lastFailedRequest!.userDataset : userDataset ?? contextualDataset;
     const requestDashboardContext = retrying
       ? lastFailedRequest!.dashboardContext
       : buildDashboardContext(widgets, cleanQuery);
@@ -239,7 +240,9 @@ export function AppShell() {
       role: "user",
       content: retrying
         ? `重试上一次请求：${cleanQuery}`
-        : requestDataset ? `${cleanQuery}\n\nAttached data: ${requestDataset.name}` : cleanQuery,
+        : requestDataset
+          ? `${cleanQuery}\n\n${requestDataset.origin === "dashboard" ? "Using dashboard data" : "Attached data"}: ${requestDataset.name}`
+          : cleanQuery,
     };
     setMessages((current) => [...current, userMessage].slice(-20));
     setQuery("");

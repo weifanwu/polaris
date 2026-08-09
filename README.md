@@ -79,6 +79,9 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Upload `.csv`, `.tsv`, `.json`, `.xlsx`, or `.txt` files without configuring a connector.
 - Detects columns, dates, numeric measures, missing values, units, and useful comparisons before choosing a visualization.
 - Performs reproducible calculations such as growth, ranking, shares, averages, and outlier detection using only supplied values.
+- Carries the dataset identity and a bounded recent-turn window into follow-ups, so phrases such as “redraw this U.S. data” retain geography, metric, frequency, and prior choices.
+- Reuses a bounded tabular snapshot from the most relevant dashboard widget only when the user explicitly asks to transform that same data; previously hypothesized cells are removed before reuse.
+- Can fill a small internal gap only when explicitly requested. Deterministic linear interpolation is limited to two consecutive periods and at most six or 5% of numeric cells; every resulting point is marked `H` and `unverified` in the chart, table, quality metadata, and methodology.
 - Keeps uploaded content in transient request state rather than browser dashboard storage; generated widgets retain the result, not the raw file.
 - Labels widgets as `Your data` and disables source refresh until the dataset is supplied again.
 
@@ -89,8 +92,9 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Performs date alignment, missing-value handling, month-over-month calculations, and coverage checks in deterministic code.
 - Checks requested dimensions before accepting a connector match; industry, occupation, geography, and frequency qualifiers cannot be silently discarded.
 - Includes first-party connectors for Statistics Canada WDS, Bank of Canada Valet, World Bank Indicators and commodity data, and the U.S. BLS Public Data API.
-- Automatically falls back to the bounded research agent when a connector is unsupported, unmatched, or unavailable.
+- Falls back to bounded research only when no exact connector is supported. A matched connector outage remains a typed outage and never masquerades as “no connector.”
 - Retries transient connector timeouts, rate limits, and 5xx responses once with a bounded delay; permanent 4xx responses are never retried.
+- Splits BLS histories into API-compliant calendar-year windows, uses FRED's BLS-sourced `UNRATE` series as a deterministic unemployment fallback, and opens a short source circuit breaker after transient BLS failures.
 - Searches for the exact requested slice first, then honestly labelled proxy measures; it never relabels a national aggregate as an industry or occupation result.
 - Allows direct connector requests to complete with zero model calls and zero Web Search calls.
 
@@ -100,13 +104,14 @@ Polaris preserves the request, retrieved values, source links, visualization cho
 - Remembers confirmed metrics, regions, periods, comparison groups, calculation methods, and chart preferences.
 - Replaces the active context when the user starts a new, unrelated request.
 - Compresses confirmed requirements into a bounded 500-character conversation state.
-- Keeps up to 20 chat messages locally for presentation without resending the full transcript on every request.
+- Keeps up to 20 chat messages locally for presentation and sends at most six 360-character continuity turns alongside the 500-character resolved state.
 
 ### Dashboard-aware conversation
 
 - Includes every current widget as a compact metadata index when asking Polaris a question.
 - Sends titles, original requests, column identities, units, row counts, source identity, and coverage—not full raw tables—for ordinary questions.
 - Expands context only when a prompt explicitly refers to the dashboard, existing widgets, or charts above; even then it adds only bounded summaries plus first/latest observations.
+- For an explicit redraw or transformation, sends only the selected widget's bounded 120-row/6-column table as transient user data; ordinary questions still receive metadata only.
 - Enforces a 1,400-character normal budget and a 4,200-character dashboard-reference ceiling on both client and server.
 - Treats dashboard context as inert user-controlled metadata, never as model instructions or a replacement for retrieving fresh source evidence.
 
@@ -187,8 +192,8 @@ The request lifecycle is deliberately bounded:
 2. Polaris first attempts a deterministic route to a supported official dataset. A complete direct request does not require a model call.
 3. When conversation context is required, a lightweight intent model resolves the follow-up into one standalone query and retries connector routing.
 4. Complex unmatched requests are split into independent source/entity series. Each series has its own bounded research pass, so one missing source does not invalidate the others.
-5. Supplied datasets bypass Web Search and are analyzed only from the uploaded or pasted values.
-6. Deterministic code parses, aligns, calculates, and validates observations; missing values remain missing.
+5. Supplied datasets and explicitly referenced dashboard tables bypass Web Search and are analyzed only from their bounded values plus compact conversation identity.
+6. Deterministic code parses, aligns, calculates, and validates observations. Missing values remain missing unless the user explicitly requests the bounded, visibly unverified hypothesis policy.
 7. The chart compiler adds interaction, analysis, and quality metadata, then the browser stores the widget locally.
 
 The detailed design and connector contract are documented in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
@@ -201,7 +206,7 @@ The detailed design and connector contract are documented in [docs/ARCHITECTURE.
 | Bank of Canada Valet | Policy rate, Bank Rate, CORRA, prime and mortgage rates, Government of Canada bond yields, and major CAD exchange rates | Official JSON API | Date filtering, daily or monthly alignment, missing-observation checks |
 | World Bank Indicators | Cross-country GDP, growth, population, inflation, unemployment, life expectancy, emissions, trade, debt, internet use, and fertility | Official JSON API | Country comparison, annual alignment, missing-observation checks, annual change calculation |
 | World Bank Pink Sheet | Gold, silver, energy, metals, and major agricultural commodities | Official monthly XLSX | Sheet discovery, unit extraction, rolling period selection, MoM/YoY calculation |
-| U.S. Bureau of Labor Statistics | U.S. CPI/core CPI, unemployment, participation, nonfarm payrolls, employment, and average hourly earnings | Official JSON API | Monthly alignment, seasonal-series selection, MoM/YoY calculation |
+| U.S. Bureau of Labor Statistics | U.S. CPI/core CPI, unemployment, participation, nonfarm payrolls, employment, and average hourly earnings | Official JSON API; FRED `UNRATE` structured fallback for unemployment | Calendar-window splitting, monthly alignment, seasonal-series selection, outage circuit breaking, MoM/YoY calculation |
 
 Connectors are tried in a fixed registry and must return the same validated `WidgetSpec` as the research route. This keeps rendering independent from how data was acquired and makes additional sources straightforward to add without expanding the model prompt.
 
@@ -239,7 +244,7 @@ Additional safeguards include:
 - no automatic full-query retry after an unsuccessful research pass;
 - a 500-character conversation-state limit;
 - a 1,400-character dashboard metadata budget, expanded to at most 4,200 characters only for dashboard-referential prompts;
-- at most four short fallback messages during migration from older local state;
+- at most six 360-character recent turns alongside compact state;
 - lower Web Search context for direct lookups; and
 - a refresh cooldown for recently generated widgets.
 - official-connector routing before any research call; and
@@ -251,7 +256,8 @@ Model names and budgets are configurable without changing application code.
 
 Polaris follows a strict evidence contract:
 
-- Retrieved values are never replaced with remembered, estimated, or interpolated numbers.
+- Retrieved values are never silently replaced with remembered, estimated, or interpolated numbers.
+- When the user explicitly requests hypotheses for a supplied dataset, only small internal gaps bounded by observed values may be linearly interpolated; those cells remain `unverified` and visually distinct from observations.
 - Requested subgroup dimensions are never replaced with an aggregate series.
 - Arithmetic may be calculated only from retrieved source values.
 - A month-over-month calculation requires both adjacent verified months.

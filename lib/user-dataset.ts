@@ -3,6 +3,7 @@ export type UserDataset = {
   format: "csv" | "tsv" | "json" | "text" | "xlsx";
   content: string;
   truncated?: boolean;
+  origin?: "attachment" | "dashboard";
 };
 
 export const MAX_USER_DATA_CHARS = 180_000;
@@ -23,5 +24,6 @@ export function parseUserDataset(value: unknown): UserDataset | null {
     content,
     format: format as UserDataset["format"],
     truncated: candidate.truncated === true,
+    origin: candidate.origin === "dashboard" ? "dashboard" : "attachment",
   };
 }

@@ -16,6 +16,7 @@ export const columnSchema = z.object({
 
 export const rowSchema = z.object({
   cells: z.array(z.string().max(300)).max(6),
+  cellStatus: z.array(z.enum(["verified", "unverified", "missing"])).max(6).optional(),
 });
 
 export const sourceSchema = z.object({
@@ -34,6 +35,8 @@ export const dataQualitySchema = z.object({
   frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "annual", "mixed", "unknown"]),
   verifiedAt: z.string().datetime(),
   scope: z.string().max(240).optional(),
+  unverifiedPoints: z.number().int().nonnegative().optional(),
+  hypothesisMethod: z.string().max(240).optional(),
 });
 
 export const widgetSpecSchema = z
@@ -57,6 +60,13 @@ export const widgetSpecSchema = z
           code: "custom",
           path: ["rows", index, "cells"],
           message: "Each row must have exactly one cell per column.",
+        });
+      }
+      if (row.cellStatus && row.cellStatus.length !== row.cells.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["rows", index, "cellStatus"],
+          message: "Cell provenance must contain exactly one status per cell.",
         });
       }
     });

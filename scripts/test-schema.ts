@@ -21,9 +21,11 @@ import { readWorksheet } from "../lib/data-connectors/xlsx";
 import { listWorksheetNames } from "../lib/data-connectors/xlsx";
 import { MAX_USER_DATA_CHARS, parseUserDataset } from "../lib/user-dataset";
 import { fetchWithTransientRetry } from "../lib/data-connectors/http";
-import { buildDashboardContext, MAX_DASHBOARD_CONTEXT_CHARS, parseDashboardContext, queryReferencesDashboard } from "../lib/dashboard-context";
+import { buildDashboardContext, buildReferencedWidgetDataset, MAX_DASHBOARD_CONTEXT_CHARS, parseDashboardContext, queryReferencesDashboard, queryReferencesDataset } from "../lib/dashboard-context";
 import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
+import { applyRequestedHypotheses } from "../lib/hypothesis-data";
+import { resolveOfficialConnector } from "../lib/data-connectors";
 import { strToU8, zipSync } from "fflate";
 
 const valid = {
@@ -70,6 +72,7 @@ assert.equal(queryReferencesDashboard("对比一下仪表板上面的图"), true
 assert.match(expandedDashboard, /latest:/, "dashboard-referential questions should receive boundary observations");
 assert.ok(expandedDashboard.length <= MAX_DASHBOARD_CONTEXT_CHARS, "dashboard context must stay within the input budget");
 assert.equal(parseDashboardContext("x".repeat(MAX_DASHBOARD_CONTEXT_CHARS + 100)).length, MAX_DASHBOARD_CONTEXT_CHARS, "server dashboard context must be bounded independently");
+assert.equal(queryReferencesDataset("这个是美国失业率数据，帮我重新画"), true, "dataset redraw requests should resolve to dashboard data");
 
 const refreshContextFixture = buildRefreshContext(parsedValidWidget);
 assert.deepEqual(parseRefreshContext(refreshContextFixture), refreshContextFixture, "refresh identity metadata should round-trip through the server parser");
@@ -150,6 +153,11 @@ assert.equal(
   false,
   "cell count must match column count",
 );
+assert.equal(
+  widgetSpecSchema.safeParse({ ...valid, rows: [{ cells: ["2026-08-06", "42"], cellStatus: ["verified"] }] }).success,
+  false,
+  "cell provenance count must match the row shape",
+);
 
 assert.equal(
   generateWidgetResultSchema.safeParse({
@@ -201,7 +209,7 @@ assert.equal(
 );
 assert.deepEqual(
   parseUserDataset({ name: "sample.csv", format: "csv", content: "date,value\n2026-01,10" }),
-  { name: "sample.csv", format: "csv", content: "date,value\n2026-01,10", truncated: false },
+  { name: "sample.csv", format: "csv", content: "date,value\n2026-01,10", truncated: false, origin: "attachment" },
   "valid user datasets should be bounded and parsed",
 );
 assert.equal(
@@ -216,11 +224,11 @@ const boundedHistory = parseConversationHistory(
     content: `turn-${index}-${"x".repeat(600)}`,
   })),
 );
-assert.equal(boundedHistory.length, 4, "only four fallback turns should be retained");
+assert.equal(boundedHistory.length, 6, "only six bounded continuity turns should be retained");
 assert.equal(
   Math.max(...boundedHistory.map((turn) => turn.content.length)),
-  400,
-  "fallback turns should be capped at 400 characters",
+  360,
+  "fallback turns should be capped at 360 characters",
 );
 assert.equal(
   parseConversationContext(`  ${"x".repeat(700)}  `).length,
@@ -301,6 +309,22 @@ const chartWithGap = toChartData(
 assert.equal(chartWithGap[0].ottawa, null, "missing numeric values should render as gaps");
 assert.equal(chartWithGap[0].toronto, 1.2, "verified numeric values should remain numeric");
 
+const hypothesisFixture = widgetSpecSchema.parse({
+  ...valid,
+  rows: [
+    { cells: ["2026-01", "4.0"] },
+    { cells: ["2026-02", ""] },
+    { cells: ["2026-03", "4.4"] },
+  ],
+});
+const hypothesis = applyRequestedHypotheses(hypothesisFixture, "缺少的数据按上下文推测，并标成 unverified");
+assert.equal(hypothesis.appliedPoints, 1, "one small internal gap should be interpolated deterministically");
+assert.equal(hypothesis.widget.rows[1].cells[1], "4.2", "interpolation should preserve the surrounding precision");
+assert.equal(hypothesis.widget.rows[1].cellStatus?.[1], "unverified", "hypothesis cells must carry explicit provenance");
+const dashboardDataset = buildReferencedWidgetDataset([hypothesis.widget], "这个数据帮我重新画");
+assert.equal(dashboardDataset?.origin, "dashboard", "a referential redraw should reuse a bounded dashboard dataset");
+assert.match(dashboardDataset?.content ?? "", /^2026-02,$/m, "previous hypothesis values must be removed before dashboard-data reuse");
+
 assert.equal(requestedMonthlyPeriods("过去两年的金价"), 24, "Chinese year ranges should become monthly periods");
 assert.equal(requestedMonthlyPeriods("过去二十四个月的CPI"), 24, "compound Chinese numerals should be parsed");
 assert.equal(requestedMonthlyPeriods("last 18 months of silver"), 18, "English month ranges should be parsed");
@@ -343,4 +367,32 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-console.log("Polaris schema, connector, dashboard-context, refresh, and agent-policy tests passed (57 cases).");
+try {
+  let blsAttempts = 0;
+  let fredAttempts = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("api.bls.gov")) {
+      blsAttempts += 1;
+      return new Response("maintenance", { status: 503 });
+    }
+    if (url.includes("fred.stlouisfed.org")) {
+      fredAttempts += 1;
+      return new Response("observation_date,UNRATE\n2026-04-01,4.1\n2026-05-01,\n2026-06-01,4.2\n2026-07-01,4.3\n", { status: 200 });
+    }
+    throw new Error(`Unexpected connector URL: ${url}`);
+  };
+  const blsFallback = await resolveOfficialConnector("过去十年美国每月失业率");
+  assert.equal(blsFallback.status, "success", "a BLS outage should recover through the deterministic FRED mirror");
+  assert.equal(blsAttempts, 2, "BLS should receive one bounded transient retry before fallback");
+  assert.equal(fredAttempts, 1, "FRED fallback should be attempted once after BLS retry exhaustion");
+  if (blsFallback.status === "success") {
+    assert.match(blsFallback.result.message, /FRED/, "the fallback delivery path must be disclosed to the user");
+    assert.equal(blsFallback.result.widget.dataQuality?.sourceName, "U.S. Bureau of Labor Statistics", "source identity should stay stable for refresh compatibility");
+    assert.equal(blsFallback.result.widget.rows.find((row) => row.cells[0] === "2026-05")?.cells[1], "", "blank FRED observations must remain missing instead of becoming zero");
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+console.log("Polaris schema, connector fallback, conversation continuity, provenance, refresh, and agent-policy tests passed.");

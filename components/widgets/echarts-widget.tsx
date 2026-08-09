@@ -140,14 +140,30 @@ export function EChartsWidget({ widget, type }: { widget: WidgetSpec; type: "lin
         itemStyle: { color: COLORS[index % COLORS.length], borderRadius: type === "bar" ? [3, 3, 0, 0] : undefined },
         emphasis: { focus: "series" },
         valueFormatter: (value: unknown) => valueLabel(value, column.unit),
-        markPoint: type === "line" ? {
+        markPoint: {
           symbolSize: 32,
           label: { color: "#071013", fontSize: 8, formatter: "{b}" },
           data: [
-            { type: "max", name: "High" },
-            { type: "min", name: "Low" },
+            ...(type === "line" ? [
+              { type: "max", name: "High" },
+              { type: "min", name: "Low" },
+            ] : []),
+            ...widget.rows.flatMap((row) => {
+              const columnIndex = widget.columns.findIndex((candidate) => candidate.key === column.key);
+              if (row.cellStatus?.[columnIndex] !== "unverified") return [];
+              const value = Number((row.cells[columnIndex] ?? "").replace(/,/g, ""));
+              return Number.isFinite(value) ? [{
+                name: "Unverified hypothesis",
+                coord: [row.cells[0], value],
+                value,
+                symbol: "diamond",
+                symbolSize: 12,
+                itemStyle: { color: "#f59e0b", borderColor: "#fff7d6", borderWidth: 1 },
+                label: { show: true, formatter: "H", color: "#1b1203", fontSize: 7, fontWeight: 800 },
+              }] : [];
+            }),
           ],
-        } : undefined,
+        },
         markLine: type === "line" ? {
           silent: true,
           symbol: ["none", "none"],
@@ -165,7 +181,7 @@ export function EChartsWidget({ widget, type }: { widget: WidgetSpec; type: "lin
       resizeObserver.disconnect();
       chart.dispose();
     };
-  }, [data, numericColumns, type, widget.columns, widget.summary, widget.title, xKey]);
+  }, [data, numericColumns, type, widget.columns, widget.rows, widget.summary, widget.title, xKey]);
 
   return <div ref={containerRef} className="chart-area echarts-canvas" role="img" aria-label={widget.title} />;
 }

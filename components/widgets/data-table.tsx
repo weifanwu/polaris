@@ -20,13 +20,13 @@ export function DataTable({ widget }: { widget: WidgetSpec }) {
               {row.cells.map((cell, cellIndex) => (
                 <td
                   key={`${widget.id}-${rowIndex}-${cellIndex}`}
-                  className={
-                    widget.columns[cellIndex]?.dataType === "number"
-                      ? "numeric"
-                      : undefined
-                  }
+                  className={[
+                    widget.columns[cellIndex]?.dataType === "number" ? "numeric" : "",
+                    row.cellStatus?.[cellIndex] === "unverified" ? "unverified" : "",
+                  ].filter(Boolean).join(" ") || undefined}
+                  title={row.cellStatus?.[cellIndex] === "unverified" ? "Unverified hypothesis value" : undefined}
                 >
-                  {cell}
+                  {row.cellStatus?.[cellIndex] === "unverified" ? `≈ ${cell}` : cell}
                 </td>
               ))}
             </tr>

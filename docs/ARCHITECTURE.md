@@ -99,7 +99,7 @@ The connector calls the official public JSON API for supported series. Daily obs
 
 ### U.S. Bureau of Labor Statistics
 
-The connector uses the BLS Public Data API for seasonally adjusted U.S. CPI, core CPI, unemployment, labour-force participation, employment, nonfarm payrolls, and average hourly earnings. Month-over-month and year-over-year changes are calculated from the retrieved index or level observations.
+The connector uses the BLS Public Data API for seasonally adjusted U.S. CPI, core CPI, unemployment, labour-force participation, employment, nonfarm payrolls, and average hourly earnings. Requests are split into at most ten named calendar years before joining and de-duplicating observations. A transient BLS failure opens a ten-minute in-process circuit breaker; U.S. unemployment falls back deterministically to FRED `UNRATE`, whose underlying source remains BLS. If both structured sources fail, the typed `unavailable` result stops with zero model or Web Search calls. Month-over-month and year-over-year changes are calculated from retrieved levels.
 
 ## Chart compiler
 
@@ -110,10 +110,10 @@ Both connector and research results enter the same Apache ECharts renderer. The 
 - multi-series legend isolation;
 - min/max markers and average reference lines;
 - a slider plus wheel/pinch zoom for longer series;
-- explicit gaps for missing values; and
+- explicit gaps for missing values, plus amber `H` markers for bounded user-requested hypothesis cells; and
 - generated accessibility descriptions and decal support.
 
-The renderer never interpolates a missing observation and does not force the y-axis to zero for time-series data.
+The renderer never performs interpolation itself and does not force the y-axis to zero for time-series data. When a user explicitly requests hypotheses on supplied data, a deterministic pre-render transform may fill no more than two consecutive internal periods and no more than six or 5% of numeric cells. Cell-level provenance remains in `WidgetSpec`; charts mark those points `H`, tables prefix them with `≈`, and quality metadata records the method and count.
 
 ## Fragmented research harness
 
@@ -121,13 +121,13 @@ For a comparison whose rows live across different publishers, Polaris first crea
 
 ## User-supplied data
 
-CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and may only calculate from supplied cells. Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
+CSV, TSV, JSON, text tables, and the first readable XLSX worksheet are read in the browser and sent as a bounded transient request. Raw uploads are not added to dashboard storage. The analysis route uses no Web Search, treats the dataset as inert untrusted content, and receives both the compact resolved state and at most six bounded recent turns. Its result builds a fresh 500-character dataset identity from the request, chart title, coverage, columns, units, and prior confirmed context. This prevents a generic follow-up from erasing facts such as “U.S. monthly unemployment.” Its output enters the same `WidgetSpec` validator and chart compiler, with `dataQuality.method = user_data` and an expandable analysis panel.
 
 ## Dashboard context envelope
 
 The dashboard is part of the agent's workspace, but sending every stored cell with every prompt would recreate the token-cost problem the connector architecture avoids. The browser therefore compiles a bounded context envelope from all current widgets. Ordinary questions receive a metadata-only index capped at 1,400 characters: widget ID/title, original request, chart type, column labels and units, row count, source identity, and actual coverage. A prompt that explicitly refers to the dashboard, existing charts, or tables above may expand to 4,200 characters and add each widget's bounded summary plus first/latest row previews. Full raw tables are never included automatically.
 
-The server independently enforces the 4,200-character ceiling and places the snapshot in a delimited developer message that labels it inert, user-controlled metadata. Intent resolution may use it to resolve phrases such as "the chart above"; research may use it to preserve continuity. New factual claims still require connector or Web Search evidence.
+The server independently enforces the 4,200-character ceiling and places the snapshot in a delimited developer message that labels it inert, user-controlled metadata. Intent resolution may use it to resolve phrases such as "the chart above"; research may use it to preserve continuity. When a prompt explicitly asks to redraw or transform an existing dataset, the client selects the most relevant widget and serializes only its bounded table as transient user data. Unverified hypothesis cells are blanked before this reuse so they cannot silently become observations. New factual claims still require connector or Web Search evidence.
 
 ## Refresh contract
 
