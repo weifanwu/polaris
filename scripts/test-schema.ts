@@ -26,6 +26,7 @@ import { buildDashboardContext, buildReferencedWidgetDataset, MAX_DASHBOARD_CONT
 import { buildRefreshContext, parseRefreshContext, validateRefreshCandidate } from "../lib/widget-refresh";
 import { generateWidgetResultSchema, widgetSpecSchema } from "../lib/widget-schema";
 import { applyRequestedHypotheses } from "../lib/hypothesis-data";
+import { evaluateRequestedCoverage, requestedPeriodTarget } from "../lib/coverage-policy";
 import { buildOfficialRecoveryQuery, resolveOfficialConnector } from "../lib/data-connectors";
 import { migrateWorkspace, normalizeDashboardName } from "../lib/storage";
 import { buildRecoveryExecutionTrace, createRecoveryProposal, isRecoveryApproval, isRecoveryDismissal } from "../lib/recovery-proposal";
@@ -314,6 +315,11 @@ assert.match(
   "current should confirm the end of a relative rolling range",
 );
 assert.match(
+  resolveDeterministicFollowUp("要二十年的240个月啊", "加拿大全国平均住宅售价；过去20年；月度") ?? "",
+  /240 monthly observations/,
+  "an explicit row-count correction should become a hard coverage constraint without another intent call",
+);
+assert.match(
   resolveDeterministicFollowUp(
     "接受。直接采用最新季度 DHEA 可获得的最接近官方财富分组，不要推算。",
     "分析加拿大最新家庭财富分布；询问是否接受 DHEA 官方分组",
@@ -356,6 +362,32 @@ assert.equal(
   inferPartialDataPolicy("必须完整连续，不能缺失"),
   false,
   "explicit completeness requirements should disable partial data",
+);
+assert.equal(requestedPeriodTarget("加拿大过去20年月度平均住宅售价", "monthly"), 240, "twenty monthly years should resolve to 240 requested periods");
+assert.equal(requestedPeriodTarget("要二十年的240个月", "unknown"), 240, "an explicit correction to 240 months should survive intent ambiguity");
+assert.equal(
+  evaluateRequestedCoverage({
+    query: "加拿大过去20年月度平均住宅售价",
+    frequency: "monthly",
+    seriesCount: 1,
+    observedPeriods: 2,
+    availablePoints: 2,
+    allowPartialData: true,
+  }).sufficient,
+  false,
+  "2/240 observations must never be reported as complete coverage",
+);
+assert.equal(
+  evaluateRequestedCoverage({
+    query: "加拿大过去20年月度平均住宅售价",
+    frequency: "monthly",
+    seriesCount: 1,
+    observedPeriods: 120,
+    availablePoints: 120,
+    allowPartialData: true,
+  }).sufficient,
+  true,
+  "explicitly allowed partial data may render once at least half of a long requested window is verified",
 );
 
 const researchFallback = buildResearchFallbackInstruction("加拿大IT行业最近10年月度失业率");

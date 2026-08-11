@@ -32,6 +32,16 @@ export function resolveDeterministicFollowUp(query: string, conversationContext:
   if (!conversationContext) return null;
   const cleanQuery = query.trim();
 
+  const explicitMonthCorrection = cleanQuery.match(/([一二两三四五六七八九十\d]+)\s*个月/i);
+  if (explicitMonthCorrection && /(?:要|需要|必须|完整|连续|只有|不是|months?)/i.test(cleanQuery)) {
+    return `${conversationContext.slice(0, 360)}; confirmed hard coverage requirement: trailing ${explicitMonthCorrection[1]} monthly observations ending at the latest available month; do not report success with fewer observations unless the response explicitly states the shortfall.`.slice(0, 500);
+  }
+
+  const explicitYearCorrection = cleanQuery.match(/(?:要|需要|必须|就是).{0,8}([一二两三四五六七八九十\d]+)\s*年/i);
+  if (explicitYearCorrection) {
+    return `${conversationContext.slice(0, 380)}; confirmed range: trailing ${explicitYearCorrection[1]} years ending at the latest available observation; preserve the previously resolved metric, geography, and frequency.`.slice(0, 500);
+  }
+
   if (/^(?:软件|IT|信息技术|计算机).{0,4}(?:行业|产业)$/i.test(cleanQuery)) {
     return `${conversationContext.slice(0, 420)}; confirmed scope: software industry`.slice(0, 500);
   }

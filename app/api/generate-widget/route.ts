@@ -32,6 +32,7 @@ import { parseRefreshContext, type RefreshContext } from "@/lib/widget-refresh";
 import { applyRequestedHypotheses } from "@/lib/hypothesis-data";
 import { buildInsightEvidencePacket, enrichWidgetInsights } from "@/lib/insight-engine";
 import { createRecoveryProposal } from "@/lib/recovery-proposal";
+import { evaluateRequestedCoverage, type CoverageFrequency } from "@/lib/coverage-policy";
 import {
   generateWidgetResultSchema,
   intentResolutionSchema,
@@ -403,22 +404,67 @@ function inferFrequency(query: string) {
   return "unknown" as const;
 }
 
-function buildWebDataQuality(widget: NonNullable<GenerateWidgetResult["widget"]>, query: string) {
+function inferWidgetFrequency(
+  widget: NonNullable<GenerateWidgetResult["widget"]>,
+  query: string,
+): CoverageFrequency {
+  const requested = inferFrequency(query);
+  if (requested !== "unknown") return requested;
+  const periods = widget.rows.map((row) => row.cells[0]?.trim() ?? "").filter(Boolean);
+  if (periods.length < 2) return "unknown";
+  if (periods.every((period) => /^\d{4}-\d{2}$/.test(period))) return "monthly";
+  if (periods.every((period) => /^\d{4}-Q[1-4]$/i.test(period))) return "quarterly";
+  if (periods.every((period) => /^\d{4}$/.test(period))) return "annual";
+  if (periods.every((period) => /^\d{4}-\d{2}-\d{2}$/.test(period))) return "daily";
+  return "unknown";
+}
+
+function assessWebDataCoverage(
+  widget: NonNullable<GenerateWidgetResult["widget"]>,
+  query: string,
+  allowPartialData: boolean,
+  frequencyHint?: CoverageFrequency,
+) {
   const numericIndices = widget.columns.flatMap((column, index) => column.dataType === "number" ? [index] : []);
   const numericCells = widget.rows.flatMap((row) => numericIndices.map((index) => row.cells[index]?.trim() ?? ""));
   const availablePoints = numericCells.filter(Boolean).length;
-  const requestedPoints = numericCells.length;
-  return {
+  const frequency = frequencyHint && frequencyHint !== "unknown"
+    ? frequencyHint
+    : inferWidgetFrequency(widget, query);
+  const coverage = evaluateRequestedCoverage({
+    query,
+    frequency,
+    seriesCount: Math.max(1, numericIndices.length),
+    observedPeriods: widget.rows.length,
+    availablePoints,
+    allowPartialData,
+  });
+  const requestedPoints = coverage.targetPeriods === null ? numericCells.length : coverage.requestedPoints;
+  return { quality: {
     method: "web_search" as const,
     sourceName: widget.sources[0]?.title || "Web Search",
     requestedPoints,
     availablePoints,
-    missingPoints: requestedPoints - availablePoints,
+    missingPoints: Math.max(0, requestedPoints - availablePoints),
     coverageStart: widget.rows[0]?.cells[0] || null,
     coverageEnd: widget.rows.at(-1)?.cells[0] || null,
-    frequency: inferFrequency(query),
+    frequency,
     verifiedAt: new Date().toISOString(),
-  };
+  }, coverage };
+}
+
+function insufficientCoverageMessage(
+  query: string,
+  targetPeriods: number | null,
+  observedPeriods: number,
+  availablePoints: number,
+  requestedPoints: number,
+) {
+  const chinese = /[\u3400-\u9fff]/.test(query);
+  if (chinese) {
+    return `你要求的是 ${targetPeriods ?? requestedPoints} 个时期，但本轮只验证到 ${observedPeriods} 个时期、${availablePoints}/${requestedPoints} 个数值。覆盖范围不足以代表请求窗口，因此没有创建误导性图表；Polaris 不会再把返回结果内部的 2/2 冒充成用户要求的 240/240。`.slice(0, 500);
+  }
+  return `The request requires ${targetPeriods ?? requestedPoints} periods, but this run verified only ${observedPeriods} periods and ${availablePoints}/${requestedPoints} values. That coverage is not representative of the requested window, so Polaris did not create a misleading widget.`.slice(0, 500);
 }
 
 function buildUserDataQuality(
@@ -813,11 +859,40 @@ async function analyzeUserDataset(
     dataset,
     conversationContext,
   );
+  const webAssessment = acquisition === "web_search"
+    ? assessWebDataCoverage(hypothesis.widget, query, inferPartialDataPolicy(query))
+    : null;
+  if (webAssessment && !webAssessment.coverage.sufficient) {
+    const message = insufficientCoverageMessage(
+      query,
+      webAssessment.coverage.targetPeriods,
+      hypothesis.widget.rows.length,
+      webAssessment.quality.availablePoints,
+      webAssessment.quality.requestedPoints,
+    );
+    return Response.json(generateWidgetResultSchema.parse({
+      status: "cannot_answer",
+      message,
+      widget: null,
+      conversationContext: conversationMemory,
+      usage,
+      trace: {
+        mode: "web_search",
+        summary: "A downloadable source was parsed, but its verified coverage was too small for the requested window.",
+        events: [
+          ...(options.researchEvents ?? []),
+          traceEvent("route", routeTitle, routeDetail),
+          traceEvent("transform", "Dataset analyzed", `Prepared ${hypothesis.widget.rows.length} rows for coverage validation.`, "complete", Date.now() - startedAt),
+          traceEvent("validation", "Requested coverage not met", message, "failed"),
+        ],
+      },
+    }));
+  }
   const widgetWithQualityBase = widgetSpecSchema.parse({
     ...hypothesis.widget,
     originalQuery: conversationMemory,
     dataQuality: acquisition === "web_search"
-      ? buildWebDataQuality(hypothesis.widget, query)
+      ? webAssessment!.quality
       : buildUserDataQuality(hypothesis.widget, dataset, hypothesis.method),
   });
   const insightResult = await applyProfessionalInsights(widgetWithQualityBase, {
@@ -979,6 +1054,7 @@ async function assembleResearchWidget(
   plan: ResearchPlan,
   results: SeriesResearch[],
   usage: RequestUsage,
+  allowPartialData: boolean,
   dashboardContext = "",
   conversationContext = "",
   history: ConversationTurn[] = [],
@@ -1023,6 +1099,51 @@ async function assembleResearchWidget(
   ).values()).slice(0, 5);
   if (!sources.length) return null;
 
+  const coverage = evaluateRequestedCoverage({
+    query: effectiveQuery,
+    frequency: plan.frequency,
+    seriesCount: boundedSeries.length,
+    observedPeriods: periods.length,
+    availablePoints,
+    allowPartialData,
+  });
+  const requestedPoints = coverage.targetPeriods === null
+    ? periods.length * boundedSeries.length
+    : coverage.requestedPoints;
+  if (!coverage.sufficient) {
+    const message = insufficientCoverageMessage(
+      effectiveQuery,
+      coverage.targetPeriods,
+      periods.length,
+      availablePoints,
+      requestedPoints,
+    );
+    return Response.json(generateWidgetResultSchema.parse({
+      status: "cannot_answer",
+      message,
+      widget: null,
+      conversationContext: query,
+      usage,
+      trace: {
+        mode: "research_harness",
+        summary: "Research found some observations, but they did not meet the requested coverage floor.",
+        events: [
+          traceEvent("route", "Research harness selected", "The request required a long or fragmented time series."),
+          traceEvent("plan", "Execution plan created", boundedSeries.map((result) => `${result.plan.label} → ${result.plan.sourcePreference}`).join("; ")),
+          ...boundedSeries.map((result, index) => traceEvent(
+            "search",
+            `Researched ${result.plan.label}`,
+            `${result.searches.join("; ") || result.plan.searchQuery} · ${result.sources.length} cited source${result.sources.length === 1 ? "" : "s"} · ${seriesMaps[index].size} verified observation${seriesMaps[index].size === 1 ? "" : "s"}.`,
+            seriesMaps[index].size >= coverage.minimumPeriods ? "complete" : seriesMaps[index].size ? "warning" : "failed",
+            result.durationMs,
+          )),
+          traceEvent("source", "Sources retained", `${sources.length} cited source${sources.length === 1 ? "" : "s"} were retained for provenance.`),
+          traceEvent("validation", "Requested coverage not met", message, "failed"),
+        ],
+      },
+    }));
+  }
+
   const insights = boundedSeries.map((result, index) => {
     const values = periods.flatMap((period) => {
       const raw = seriesMaps[index].get(period);
@@ -1037,7 +1158,6 @@ async function assembleResearchWidget(
     return result.parsed.notes ? [`${result.plan.label}: ${result.parsed.notes}`] : [];
   });
   const summary = [plan.comparabilityNote, ...insights, ...limitations].filter(Boolean).join(" ").slice(0, 500);
-  const requestedPoints = periods.length * boundedSeries.length;
   const widgetBase = widgetSpecSchema.parse({
     id: crypto.randomUUID(),
     title: plan.title.slice(0, 120),
@@ -1064,7 +1184,7 @@ async function assembleResearchWidget(
       sourceName: "Multi-source research harness",
       requestedPoints,
       availablePoints,
-      missingPoints: requestedPoints - availablePoints,
+      missingPoints: Math.max(0, requestedPoints - availablePoints),
       coverageStart: periods[0],
       coverageEnd: periods.at(-1)!,
       frequency: plan.frequency,
@@ -1164,7 +1284,7 @@ async function runComplexResearchHarness(
     researchOneSeries(client, query, plan, item, allowPartialData),
   ));
   const usage = addUsage(baseUsage, readUsage(planResponse), ...results.map((result) => result.usage));
-  return assembleResearchWidget(query, plan, results, usage, dashboardContext, conversationContext, history);
+  return assembleResearchWidget(query, plan, results, usage, allowPartialData, dashboardContext, conversationContext, history);
 }
 
 async function discoverExactSeries(
@@ -1535,10 +1655,36 @@ export async function POST(request: Request) {
         || `${resolvedQuery}; use the source-backed alternative described in the proposal`;
       const candidate = normalizeModelWidget(parsed.widget, proposedQuery, sources);
       if (candidate) {
+        const assessment = assessWebDataCoverage(candidate, proposedQuery, allowPartialData);
+        if (!assessment.coverage.sufficient) {
+          const message = insufficientCoverageMessage(
+            proposedQuery,
+            assessment.coverage.targetPeriods,
+            candidate.rows.length,
+            assessment.quality.availablePoints,
+            assessment.quality.requestedPoints,
+          );
+          return Response.json(generateWidgetResultSchema.parse({
+            status: "cannot_answer",
+            message,
+            widget: null,
+            conversationContext: resolvedQuery,
+            usage,
+            trace: {
+              mode: "web_search",
+              summary: "The proposed alternative did not meet the requested coverage floor, so it was not offered as a valid widget.",
+              events: [
+                traceEvent("route", "Web research selected", "No exact deterministic connector matched the resolved request."),
+                ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+                traceEvent("validation", "Requested coverage not met", message, "failed"),
+              ],
+            },
+          }));
+        }
         const widgetWithQualityBase = widgetSpecSchema.parse({
           ...candidate,
           originalQuery: proposedQuery,
-          dataQuality: buildWebDataQuality(candidate, proposedQuery),
+          dataQuality: assessment.quality,
         });
         const insightResult = await applyProfessionalInsights(widgetWithQualityBase, {
           query: proposedQuery,
@@ -1668,9 +1814,36 @@ export async function POST(request: Request) {
         },
       }));
     }
+    const assessment = assessWebDataCoverage(widget, resolvedQuery, allowPartialData);
+    if (!assessment.coverage.sufficient) {
+      const message = insufficientCoverageMessage(
+        resolvedQuery,
+        assessment.coverage.targetPeriods,
+        widget.rows.length,
+        assessment.quality.availablePoints,
+        assessment.quality.requestedPoints,
+      );
+      return Response.json(generateWidgetResultSchema.parse({
+        status: "cannot_answer",
+        message,
+        widget: null,
+        conversationContext: resolvedQuery,
+        usage,
+        trace: {
+          mode: "web_search",
+          summary: "Web research returned cited values, but the result did not cover enough of the user's requested window.",
+          events: [
+            traceEvent("route", "Web research selected", "No exact deterministic connector matched the resolved request."),
+            ...collectSearchQueries(response).map((search) => traceEvent("search", "Web Search", search)),
+            traceEvent("source", "Cited sources collected", `${sources.length} unique cited source${sources.length === 1 ? "" : "s"} retained.`),
+            traceEvent("validation", "Requested coverage not met", message, "failed"),
+          ],
+        },
+      }));
+    }
     const widgetWithQualityBase = widgetSpecSchema.parse({
       ...widget,
-      dataQuality: buildWebDataQuality(widget, resolvedQuery),
+      dataQuality: assessment.quality,
     });
     const insightResult = await applyProfessionalInsights(widgetWithQualityBase, {
       query: resolvedQuery,

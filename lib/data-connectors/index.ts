@@ -1,4 +1,5 @@
 import { bankOfCanadaConnector } from "./bank-of-canada";
+import { canadianRealEstateAssociationConnector } from "./canadian-real-estate-association";
 import { irccPermanentResidentsConnector } from "./ircc-permanent-residents";
 import { statisticsCanadaConnector } from "./statistics-canada";
 import { detectMaterialQualifiers } from "./query-capabilities";
@@ -20,6 +21,7 @@ export type OfficialRecoveryAlternative = {
 
 const CONNECTORS = [
   irccPermanentResidentsConnector,
+  canadianRealEstateAssociationConnector,
   worldBankCommodityConnector,
   bankOfCanadaConnector,
   worldBankIndicatorsConnector,

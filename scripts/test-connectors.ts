@@ -99,6 +99,18 @@ assert.equal(permanentResidents.widget.dataQuality?.requestedPoints, 240, "20-ye
 assert.ok((permanentResidents.widget.dataQuality?.missingPoints ?? 0) > 0, "months predating IRCC's monthly file should be disclosed, not invented");
 assert.equal(permanentResidents.widget.dataQuality?.sourceName, "IRCC Monthly Permanent Residents");
 
+const nationalAverageHomePrice = await resolveWithOfficialConnector("加拿大过去20年平均房价");
+assert.ok(nationalAverageHomePrice, "CREA connector should parse the official monthly national average-price workbook");
+assert.equal(nationalAverageHomePrice.widget.rows.length, 240, "twenty years of monthly national average prices should contain 240 rows");
+assert.equal(nationalAverageHomePrice.widget.dataQuality?.requestedPoints, 240);
+assert.equal(nationalAverageHomePrice.widget.dataQuality?.availablePoints, 240);
+assert.equal(nationalAverageHomePrice.widget.dataQuality?.missingPoints, 0);
+assert.equal(nationalAverageHomePrice.widget.dataQuality?.sourceName, "Canadian Real Estate Association");
+assert.match(nationalAverageHomePrice.widget.dataQuality?.scope ?? "", /未经季节调整/);
+
+const unsupportedTorontoAveragePrice = await resolveWithOfficialConnector("多伦多过去20年月度平均房价");
+assert.equal(unsupportedTorontoAveragePrice, null, "the national CREA connector must not relabel national prices as Toronto prices");
+
 const usCpiResolution = await resolveOfficialConnector("显示美国过去24个月的CPI同比通胀率");
 assert.notEqual(usCpiResolution.status, "unsupported", "BLS CPI queries must remain owned by the exact connector even during an upstream outage");
 if (usCpiResolution.status === "success") {
@@ -110,4 +122,4 @@ if (usCpiResolution.status === "success") {
   assert.fail("BLS CPI queries must not be classified as unsupported");
 }
 
-console.log("Polaris live official-connector tests passed (Statistics Canada, IRCC, Bank of Canada, World Bank, and U.S. BLS).");
+console.log("Polaris live official-connector tests passed (Statistics Canada, IRCC, CREA, Bank of Canada, World Bank, and U.S. BLS).");
